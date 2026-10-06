@@ -1,0 +1,50 @@
+# Linux build and tests (-DX4VR_LINUX=ON), the two ways README.md describes: CMake with the
+# distribution's packages (OpenVR fetched), and Nix. Runs when files the Linux build reads change.
+# Nothing is published; the Windows build isn't touched.
+name: Linux
+
+on:
+  pull_request:
+    paths:
+      - CMakeLists.txt
+      - include/**
+      - src/**
+      - tools/**
+      - tests/**
+      - linux/**
+      - config/linux/**
+      - .github/workflows/linux.yml
+  push:
+    branches: [main]
+    paths:
+      - CMakeLists.txt
+      - include/**
+      - src/**
+      - tools/**
+      - tests/**
+      - linux/**
+      - config/linux/**
+      - .github/workflows/linux.yml
+
+permissions:
+  contents: read
+
+jobs:
+  cmake:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake g++ libvulkan-dev
+      - run: cmake -S . -B build -DX4VR_LINUX=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
+      - run: cmake --build build -j
+      - run: ctest --test-dir build --output-on-failure
+      - run: cmake --install build
+
+  nix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-26.05
+      - run: nix-build linux/nix # builds and runs the tests (doCheck)
