@@ -9,7 +9,7 @@
 //   vtable:     [-8] offset to top   [+0] → type_info   [+8...] virtual functions; an object's
 //               vptr holds the address of the first function slot (the "address point")
 //
-// Linux X4 is a non-PIE executable (docs/LINUX_FINDINGS.md, 0.3), so these pointers are plain
+// Linux X4 is a non-PIE executable, so these pointers are plain
 // absolute addresses in the file. Position-independent binaries keep them in relocations
 // instead and are refused.
 #include <cstdint>

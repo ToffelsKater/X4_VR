@@ -1,5 +1,6 @@
-# Native Linux build (docs/LINUX_PORT_PLAN.md), selected with -DX4VR_LINUX=ON from the top-level
-# CMakeLists.txt. Dependencies come from the system (Nix); nothing is downloaded.
+# Native Linux build (README.md, docs/linux/ARCHITECTURE.md), selected with -DX4VR_LINUX=ON from the top-level
+# CMakeLists.txt. Dependencies come from the system, except OpenVR's sources: fetched at configure
+# time unless OPENVR_SOURCE_DIR names a copy (Nix passes nixpkgs' openvr.src).
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
@@ -11,9 +12,17 @@ set(X4VR_ROOT ${PROJECT_SOURCE_DIR})
 find_path(VULKAN_HEADERS_DIR vulkan/vk_layer.h REQUIRED)
 # OpenVR's client library is built from source into the mod: the packaged one loads its own
 # libstdc++ and jsoncpp, which could clash with the older ones in X4's Steam runtime container.
-set(OPENVR_SOURCE_DIR "" CACHE PATH "OpenVR SDK source tree (Valve's openvr repository)")
+set(OPENVR_SOURCE_DIR "" CACHE PATH "OpenVR SDK source tree (Valve's openvr repository); empty: fetched")
+if(NOT OPENVR_SOURCE_DIR)
+  # The version nixpkgs has; SOURCE_SUBDIR names no CMakeLists.txt, so OpenVR's own build stays out.
+  include(FetchContent)
+  FetchContent_Declare(openvr GIT_REPOSITORY https://github.com/ValveSoftware/openvr.git GIT_TAG v2.15.6
+                       GIT_SHALLOW TRUE SOURCE_SUBDIR do-not-build)
+  FetchContent_MakeAvailable(openvr)
+  set(OPENVR_SOURCE_DIR ${openvr_SOURCE_DIR})
+endif()
 if(NOT EXISTS "${OPENVR_SOURCE_DIR}/src/openvr_api_public.cpp")
-  message(FATAL_ERROR "Set OPENVR_SOURCE_DIR to an OpenVR source tree (nix/package.nix passes nixpkgs' openvr.src).")
+  message(FATAL_ERROR "No OpenVR source tree at OPENVR_SOURCE_DIR (${OPENVR_SOURCE_DIR}).")
 endif()
 
 # -Wno-missing-field-initializers: the Windows code initialises Vulkan structs as Info{VK_STRUCTURE_TYPE_...}.
@@ -48,12 +57,12 @@ target_compile_options(x4vr PRIVATE ${X4VR_WARNINGS})
 # folder this was built from (shown, never deleted).
 target_compile_definitions(x4vr PRIVATE X4VR_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}" X4VR_SOURCE_DIR="${X4VR_ROOT}")
 
-# The mod: Vulkan layer, VR runtime and OpenTrack pose sender in one library, loaded into X4 by
+# The mod: Vulkan layer, VR runtime and OpenTrack client in one library, loaded into X4 by
 # the Vulkan loader (x4vr-run). Its own copy of the C++ runtime, nothing exported but the layer's
 # entry points, no unresolved symbols.
-add_library(x4vr_mod SHARED ${X4VR_ROOT}/src/linux/vr_layer.cpp ${X4VR_ROOT}/src/linux/runtime_bootstrap.cpp
-  ${X4VR_ROOT}/src/linux/pose_sender.cpp ${X4VR_ROOT}/src/linux/x11_cursor.cpp
-  ${X4VR_ROOT}/src/linux/head_watch.cpp ${X4VR_ROOT}/src/eye_targets.cpp)
+add_library(x4vr_mod SHARED ${X4VR_ROOT}/src/linux/observe_layer.cpp ${X4VR_ROOT}/src/linux/runtime_bootstrap.cpp
+  ${X4VR_ROOT}/src/linux/opentrack_client.cpp ${X4VR_ROOT}/src/linux/x11_cursor.cpp
+  ${X4VR_ROOT}/src/eye_targets.cpp)
 set_target_properties(x4vr_mod PROPERTIES OUTPUT_NAME x4vr CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 target_include_directories(x4vr_mod PRIVATE ${X4VR_ROOT}/src/linux)
 target_link_libraries(x4vr_mod PRIVATE x4vr_vr x4vr_elf Threads::Threads)
@@ -62,40 +71,17 @@ target_link_options(x4vr_mod PRIVATE -static-libstdc++ -static-libgcc -Wl,--excl
   -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/x4vr.map)
 set_target_properties(x4vr_mod PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/x4vr.map)
 
-# Phase 0 probes (docs/LINUX_PHASE0.md): the socket probe is preloaded into the whole Steam launch
-# chain, so it is C with nothing but libc.
-add_library(x4vr_probe SHARED ${X4VR_ROOT}/src/linux/probe_preload.c)
-set_target_properties(x4vr_probe PROPERTIES C_VISIBILITY_PRESET hidden)
-target_compile_options(x4vr_probe PRIVATE ${X4VR_WARNINGS})
-target_link_options(x4vr_probe PRIVATE -Wl,--exclude-libs,ALL -Wl,-z,defs)
-
-add_library(VkLayer_x4vr_probe SHARED ${X4VR_ROOT}/src/linux/probe_layer.cpp)
-target_include_directories(VkLayer_x4vr_probe PRIVATE ${VULKAN_HEADERS_DIR})
-target_compile_definitions(VkLayer_x4vr_probe PRIVATE VK_NO_PROTOTYPES)
-set_target_properties(VkLayer_x4vr_probe PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
-target_compile_options(VkLayer_x4vr_probe PRIVATE ${X4VR_WARNINGS})
-target_link_options(VkLayer_x4vr_probe PRIVATE -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -Wl,-z,defs)
-
 # Layer manifests: for the installed package, and for tests in the build tree.
-foreach(layer IN ITEMS x4vr x4vr_probe)
-  if(layer STREQUAL "x4vr")
-    set(file libx4vr.so)
-  else()
-    set(file libVkLayer_x4vr_probe.so)
-  endif()
-  set(X4VR_LAYER_PATH ${CMAKE_INSTALL_FULL_LIBDIR}/${file})
-  configure_file(VkLayer_${layer}.json.in ${CMAKE_CURRENT_BINARY_DIR}/install/VkLayer_${layer}.json @ONLY)
-  set(X4VR_LAYER_PATH ${CMAKE_CURRENT_BINARY_DIR}/${file})
-  configure_file(VkLayer_${layer}.json.in ${CMAKE_CURRENT_BINARY_DIR}/layer/VkLayer_${layer}.json @ONLY)
-endforeach()
+set(X4VR_LAYER_PATH ${CMAKE_INSTALL_FULL_LIBDIR}/libx4vr.so)
+configure_file(VkLayer_x4vr.json.in ${CMAKE_CURRENT_BINARY_DIR}/install/VkLayer_x4vr.json @ONLY)
+set(X4VR_LAYER_PATH ${CMAKE_CURRENT_BINARY_DIR}/libx4vr.so)
+configure_file(VkLayer_x4vr.json.in ${CMAKE_CURRENT_BINARY_DIR}/layer/VkLayer_x4vr.json @ONLY)
 configure_file(x4vr-run.in ${CMAKE_CURRENT_BINARY_DIR}/x4vr-run @ONLY)
-configure_file(x4vr-probe-run.in ${CMAKE_CURRENT_BINARY_DIR}/x4vr-probe-run @ONLY)
 
 install(TARGETS x4vr RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(TARGETS x4vr_mod x4vr_probe VkLayer_x4vr_probe LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/install/VkLayer_x4vr.json ${CMAKE_CURRENT_BINARY_DIR}/install/VkLayer_x4vr_probe.json
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/vulkan/explicit_layer.d)
-install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/x4vr-run ${CMAKE_CURRENT_BINARY_DIR}/x4vr-probe-run DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS x4vr_mod LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/install/VkLayer_x4vr.json DESTINATION ${CMAKE_INSTALL_DATADIR}/vulkan/explicit_layer.d)
+install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/x4vr-run DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES ${X4VR_ROOT}/config/linux/stereo.txt ${X4VR_ROOT}/config/linux/notices.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/x4vr)
 install(DIRECTORY ${X4VR_ROOT}/config/linux/profiles/ DESTINATION ${CMAKE_INSTALL_DATADIR}/x4vr/profiles)
 
@@ -147,10 +133,17 @@ if(BUILD_TESTING) # include(CTest) is in the top-level CMakeLists.txt, so ctest 
   target_compile_options(steam_config_tests PRIVATE ${X4VR_WARNINGS})
   add_test(NAME steam_config COMMAND steam_config_tests)
 
-  add_executable(probe_socket_fixture ${X4VR_ROOT}/tests/linux/probe_socket_fixture.cpp)
-  target_include_directories(probe_socket_fixture PRIVATE ${X4VR_ROOT}/src/linux)
-  target_compile_options(probe_socket_fixture PRIVATE ${X4VR_WARNINGS})
-  add_test(NAME probe_preload COMMAND ${CMAKE_COMMAND} -DFIXTURE=$<TARGET_FILE:probe_socket_fixture>
-           -DPROBE=$<TARGET_FILE:x4vr_probe> -DDIR=${CMAKE_CURRENT_BINARY_DIR}/probe-test
-           -P ${X4VR_ROOT}/tests/linux/probe_preload_test.cmake)
+  add_executable(state_files_tests ${X4VR_ROOT}/tests/linux/state_files_tests.cpp)
+  target_include_directories(state_files_tests PRIVATE ${X4VR_ROOT}/tools/linux)
+  target_compile_options(state_files_tests PRIVATE ${X4VR_WARNINGS})
+  add_test(NAME state_files COMMAND state_files_tests)
+
+  foreach(suite IN ITEMS launch_option_tests settings_swap_tests)
+    add_executable(${suite} ${X4VR_ROOT}/tests/linux/${suite}.cpp)
+    target_include_directories(${suite} PRIVATE ${X4VR_ROOT}/tools/linux)
+    target_compile_options(${suite} PRIVATE ${X4VR_WARNINGS})
+  endforeach()
+  add_test(NAME launch_option COMMAND launch_option_tests)
+  add_test(NAME settings_swap COMMAND settings_swap_tests)
+
 endif()

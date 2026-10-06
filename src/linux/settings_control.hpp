@@ -11,6 +11,7 @@
 #include <string_view>
 #include <system_error>
 #include <vector>
+#include <unistd.h>
 
 namespace x4vr::linux_port {
 // One key of stereo.txt (`key=value` lines), or `fallback` if it isn't set.
@@ -33,7 +34,8 @@ inline bool write_setting(const std::filesystem::path& path, std::string_view ke
     auto found = std::find_if(lines.begin(), lines.end(), [&](const std::string& l) { return l.rfind(prefix, 0) == 0; });
     if (found == lines.end()) lines.push_back(prefix+value);
     else *found = prefix+value;
-    const auto temporary = path.string()+".tmp";
+    // Own temporary per thread: the menu and the mod (hotkeys, SteamVR's recentre) may write at once.
+    const auto temporary = path.string()+".tmp"+std::to_string(getpid())+"-"+std::to_string(gettid());
     {
         std::ofstream out(temporary, std::ios::trunc);
         for (const auto& line : lines) out << line << '\n';
@@ -45,26 +47,11 @@ inline bool write_setting(const std::filesystem::path& path, std::string_view ke
 }
 // Returns the new value, or -1 if the file can't be read or written.
 inline int control_settings(const std::filesystem::path& path, std::string_view action) {
-    std::ifstream in(path);
-    if (!in) return -1;
-    std::vector<std::string> lines;
-    for (std::string line; std::getline(in, line);) lines.push_back(line);
-    in.close();
+    if (!std::filesystem::exists(path)) return -1;
     const bool recenter = action == "recenter";
-    const std::string key = recenter ? "recenter=" : "theater=";
-    auto found = std::find_if(lines.begin(), lines.end(), [&](const std::string& l) { return l.rfind(key, 0) == 0; });
-    const int current = found == lines.end() ? (recenter ? 0 : 1) : std::atoi(found->c_str()+key.size());
+    const char* key = recenter ? "recenter" : "theater";
+    const int current = std::atoi(read_setting(path, key, recenter ? "0" : "1").c_str());
     const int next = recenter ? current+1 : (current == 2 ? 1 : 2);
-    if (found == lines.end()) lines.push_back(key+std::to_string(next));
-    else *found = key+std::to_string(next);
-    const auto temporary = path.string()+".tmp"; // replaced atomically: the mod reads it concurrently
-    {
-        std::ofstream out(temporary, std::ios::trunc);
-        for (const auto& line : lines) out << line << '\n';
-        if (!out) return -1;
-    }
-    std::error_code error;
-    std::filesystem::rename(temporary, path, error);
-    return error ? -1 : next;
+    return write_setting(path, key, std::to_string(next)) ? next : -1;
 }
 }

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-# The native Linux port is opt-in (docs/LINUX_PORT_PLAN.md). Without the option, this file is the
+# The native Linux port is opt-in (README.md, section Linux). Without the option, this file is the
 # Windows build, unchanged.
 option(X4VR_LINUX "Build the native Linux port instead of the Windows mod" OFF)
 if(X4VR_LINUX)

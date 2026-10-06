@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# X4 VR launcher for Linux (docs/LINUX_PORT_PLAN.md, section 9.1). X4's Steam launch option:
+# X4 VR launcher for Linux (docs/linux/ARCHITECTURE.md, "Starting X4"). X4's Steam launch option:
 #
 #   /full/path/to/x4vr-run %command%
 #
@@ -18,6 +18,12 @@ if [ $# -eq 0 ]; then
     exit 2
 fi
 dir="${X4VR_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/x4vr}"
+# The game folder is the one of testandlaunch (or X4) in Steam's command.
+if [ -z "${X4VR_GAME_DIR-}" ]; then
+    for arg in "$@"; do
+        case "$arg" in */testandlaunch|*/X4) export X4VR_GAME_DIR="${arg%/*}"; break ;; esac
+    done
+fi
 # A request from `x4vr` counts for 2 minutes and is used up here.
 request="$dir/launch.request"
 if [ "${X4VR_ALWAYS:-0}" != 1 ]; then
@@ -28,6 +34,8 @@ if [ "${X4VR_ALWAYS:-0}" != 1 ]; then
         # Steam's Play: the normal game, with X4's 2D settings (back from a VR session that
         # didn't get to restore them, e.g. a crash).
         [ -f "$dir/x4-settings.vr" ] && "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" settings-mode 2d >/dev/null 2>&1
+        # The HUD extension only in VR: out of X4's sight (an older x4vr, or X4VR_FIX_SETTINGS=0).
+        "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" hud --park >/dev/null 2>&1
         exec "$@"
     fi
 fi
@@ -77,17 +85,12 @@ export VK_LOADER_DEBUG="${VK_LOADER_DEBUG:-error,warn}"
 # the VR copy in its place, and swaps back when X4 exits (below). Then fixed for VR while X4
 # isn't running yet. X4VR_FIX_SETTINGS=0 leaves config.xml alone.
 if [ "${X4VR_FIX_SETTINGS:-1}" != 0 ]; then
-    "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" settings-mode vr >> "$dir/x4vr.log" 2>&1
-    "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" fix-settings --auto >> "$dir/x4vr.log" 2>&1
+    # Fixed only once the VR copy is in place: else the fixes would land in the 2D settings.
+    "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" settings-mode vr >> "$dir/x4vr.log" 2>&1 &&
+        "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" fix-settings --auto >> "$dir/x4vr.log" 2>&1
 fi
-# The HUD distance mod (x4vr hud) is built from the game's files: apply the factor chosen in the
-# menu (stereo.txt hud_factor) and rebuild it after a game update.
-# The game folder is the one of testandlaunch (or X4) in Steam's command.
-if [ -z "${X4VR_GAME_DIR-}" ]; then
-    for arg in "$@"; do
-        case "$arg" in */testandlaunch|*/X4) export X4VR_GAME_DIR="${arg%/*}"; break ;; esac
-    done
-fi
+# The HUD distance mod (x4vr hud --refresh) is built from the game's files: back in place for VR,
+# the factor chosen in the menu (stereo.txt hud_factor) applied, rebuilt after a game update.
 "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" hud --refresh >> "$dir/x4vr.log" 2>&1
 # X4's own arguments go after Steam's command; testandlaunch passes them on to X4. Without
 # -nocputhrottle X4 drops to ~12 fps whenever its window isn't focused (while wearing the headset).
@@ -104,4 +107,5 @@ status=$?
 echo "== $(date '+%F %T') X4 exited with status $status" >> "$dir/x4vr.log"
 # X4 writes config.xml when it exits: keep that as its VR settings and restore the 2D ones.
 [ "${X4VR_FIX_SETTINGS:-1}" != 0 ] && "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" settings-mode 2d >> "$dir/x4vr.log" 2>&1
+"@CMAKE_INSTALL_FULL_BINDIR@/x4vr" hud --park >> "$dir/x4vr.log" 2>&1 # the HUD extension only in VR
 exit "$status"

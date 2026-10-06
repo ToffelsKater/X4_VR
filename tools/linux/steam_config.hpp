@@ -141,14 +141,16 @@ inline std::string read_file(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
-// Steam's client is running.
-inline bool steam_running() {
+// A process with this name (its /proc comm) is running.
+inline bool process_named(std::string_view name) {
     std::error_code error;
     for (const auto& entry : std::filesystem::directory_iterator("/proc", error)) {
         std::ifstream comm(entry.path()/"comm");
-        std::string name;
-        if (comm && std::getline(comm, name) && (name == "steam" || name == "steamwebhelper")) return true;
+        std::string text;
+        if (comm && std::getline(comm, text) && text == name) return true;
     }
     return false;
 }
+// Steam's client is running.
+inline bool steam_running() { return process_named("steam") || process_named("steamwebhelper"); }
 }

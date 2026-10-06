@@ -1,8 +1,7 @@
 #pragma once
 // OpenTrack's "UDP over network" packet, which Linux X4 reads when OpenTrack Support is on
 // (Controls → Head Tracking Support; default 127.0.0.1:4242). Six little-endian doubles:
-// x, y, z, yaw, pitch, roll. OpenTrack sends centimetres and degrees; what X4 does with them is
-// measured in docs/LINUX_FINDINGS.md (0.5).
+// x, y, z, yaw, pitch, roll, in centimetres and degrees.
 #include <array>
 #include <bit>
 #include <cstdint>

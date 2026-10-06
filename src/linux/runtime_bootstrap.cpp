@@ -1,7 +1,8 @@
-// Linux copy of src/runtime_bootstrap.cpp at commit 5064391 (docs/LINUX_PORT_PLAN.md, section 3).
+// Linux copy of src/runtime_bootstrap.cpp at commit 5064391 (docs/linux/ARCHITECTURE.md, "Code layout").
 // Changed for Linux only: environment and logging calls, file deletion, the background thread's
-// sleep, the trace clock and thread id, no X4 frame-half global yet (stage C), no OpenXR backend
-// yet (openxr_runtime_stub.hpp), and the Linux additions of linux_runtime.hpp at the end.
+// sleep, the trace clock and thread id, the headset wait, SteamVR's recentre and "Exit game"
+// events (wait_frame), the frame-half global from the X4 scan, the shared_pose setting, no OpenXR
+// backend (openxr_runtime_stub.hpp), and the Linux additions of linux_runtime.hpp at the end.
 #include <x4vr/runtime_bootstrap.hpp>
 #include "linux_runtime.hpp"
 #include "code_scan.hpp"
@@ -55,8 +56,11 @@ RuntimeBootstrap::RuntimeBootstrap() {
     // run without VR, so wait for the headset, up to X4VR_HEADSET_WAIT seconds (default 120,
     // 0: don't wait). Only failed VR_Init calls repeat: nothing is loaded or shut down meanwhile.
     // Linux only: the Windows launcher's Play starts X4 once SteamVR is ready.
+    // X4 creates several Vulkan instances at start, each building a bootstrap after a failed one:
+    // only the first waits.
+    static std::atomic<bool> waited_out{false};
     const char* wait_text = std::getenv("X4VR_HEADSET_WAIT");
-    const int wait = wait_text && *wait_text ? std::atoi(wait_text) : 120;
+    const int wait = waited_out ? 0 : wait_text && *wait_text ? std::atoi(wait_text) : 120;
     const auto deadline = std::chrono::steady_clock::now()+std::chrono::seconds(std::max(wait, 0));
     for (bool waiting = false;;) {
         try {
@@ -69,7 +73,7 @@ RuntimeBootstrap::RuntimeBootstrap() {
             const std::string what = error.what();
             const bool no_headset_yet = what.find("(108)") != std::string::npos || what.find("(126)") != std::string::npos ||
                                         what.find("(215)") != std::string::npos;
-            if (!no_headset_yet || std::chrono::steady_clock::now() >= deadline) throw;
+            if (!no_headset_yet || std::chrono::steady_clock::now() >= deadline) { waited_out = true; throw; }
             if (!waiting) linux_port::log("X4VR bootstrap: waiting up to "+std::to_string(wait)+" s for the headset: "+what);
             waiting = true;
             std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -329,6 +333,13 @@ std::string capture_dir() {
 }
 StereoSettings read_settings() {
     StereoSettings next;
+    // Linux: roll in degrees (OpenTrack). Measured on the Steam Frame (2026-10): 2.5 keeps the
+    // stars still with the head tilted 30 degrees (2.387 still turned slightly; yaw and pitch's
+    // 2.1177 clearly too little). X4's tracker scales all three angles alike (0x1a1b7c9,
+    // 0x1a0dd60), so the difference is likely in the camera controller (0x1933d00, not read):
+    // about 72 degrees of roll for the tracker's full range (180/72 = 2.5), where yaw and pitch
+    // get 85 (180/85 = 2.1177).
+    next.roll_gain = 2.5f;
     const auto root = capture_dir();
     if (root.empty()) return next;
     bool shared = true;
@@ -483,6 +494,8 @@ const volatile int32_t* frame_half_global() {
 namespace linux_port {
 bool shared_pose() { return shared_pose_setting.load(); }
 void control(const char* action, const char* source) {
+    static std::mutex mutex; // the hotkey thread and the submission thread (SteamVR's recentre)
+    std::lock_guard lock(mutex);
     const auto root = capture_dir();
     const int value = root.empty() ? -1 : control_settings(root+"/stereo.txt", action);
     if (value < 0) { log(std::string("X4VR control: ")+source+": can't update stereo.txt"); return; }

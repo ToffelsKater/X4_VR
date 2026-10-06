@@ -93,8 +93,11 @@ std::mutex state_mutex;
 CursorState state;
 std::atomic<bool> close_requested{false};
 
-// X4's top-level window: WM_CLASS "X4" or _NET_WM_PID = this process, the largest one.
+// X4's top-level window: WM_CLASS "X4" (2D) or SDL_APP_ID's (x4vr-run: "X4VR"), or
+// _NET_WM_PID = this process; the largest one.
 uint32_t find_window(const Xcb& x, Connection* c, uint32_t root, uint32_t pid_atom) {
+    const char* app_id = std::getenv("SDL_APP_ID");
+    const std::string_view window_class = app_id && *app_id ? app_id : "X4";
     GenericError* error{};
     auto* tree = x.query_tree_reply(c, x.query_tree(c, root), &error);
     std::free(error);
@@ -110,8 +113,11 @@ uint32_t find_window(const Xcb& x, Connection* c, uint32_t root, uint32_t pid_at
             const int length = x.get_property_value_length(p);
             const std::string_view value(text, size_t(std::max(length, 0)));
             const auto split = value.find('\0'); // "instance\0class\0"
-            ours = split != std::string_view::npos && value.substr(split+1).rfind("X4", 0) == 0 &&
-                   (value.size() == split+3 || value[split+3] == '\0');
+            if (split != std::string_view::npos) {
+                const auto name = value.substr(split+1);
+                const auto end = std::min(name.find('\0'), name.size());
+                ours = name.substr(0, end) == "X4" || name.substr(0, end) == window_class;
+            }
             std::free(p);
         }
         std::free(error); error = nullptr;

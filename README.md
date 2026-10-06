@@ -21,7 +21,7 @@ This is an unofficial fan project. It is not affiliated with or endorsed by Egos
 > [Limitations](#limitations).
 
 > [!NOTE]
-> Linux: a native port for the Linux version of X4 is in progress, see
+> Linux: a native port for the Linux version of X4 is available (experimental), see
 > [Linux (native X4, experimental)](#linux-native-x4-experimental).
 
 ## What works
@@ -362,44 +362,71 @@ display settings.
 
 ## Linux (native X4, experimental)
 
-A port for the native Linux build of X4 (9.00), developed alongside the Windows mod: the Windows
-build is unchanged, and the Linux one is opt-in (`-DX4VR_LINUX=ON`). Tested with a Steam Frame
-through SteamVR on an AMD GPU (RADV), Hyprland and NixOS. Install and play:
-[docs/LINUX_GUIDE.md](docs/LINUX_GUIDE.md) (a terminal menu, `x4vr`, sets it up and launches VR;
-Steam's Play button keeps starting the normal game). The design and open items are in
-[docs/LINUX_PORT_PLAN.md](docs/LINUX_PORT_PLAN.md), measurements in
-[docs/LINUX_FINDINGS.md](docs/LINUX_FINDINGS.md). How each part works on Windows and Linux:
-[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md); feature status: [docs/FEATURES.md](docs/FEATURES.md).
+A port for the native Linux version of X4 9.00, through SteamVR. It covers stereo in the cockpit
+and on foot, head tracking, the virtual screen for menus, the mouse cursor and the HUD distance.
+OpenXR isn't supported on Linux yet. It was tested with a Steam Frame on an AMD GPU. NVIDIA and
+Intel GPUs should work but are untested: please send a bug report either way. The Windows build
+is unchanged. How it works and what differs from Windows: [docs/linux](docs/linux/ARCHITECTURE.md).
 
-**What works:** stereo in the cockpit and on foot with head tracking (leaning back included),
-the virtual screen for menus, the mouse cursor, Ctrl+F12 / Ctrl+F11 and SteamVR's recentre and
-Exit game, the HUD distance (at its normal size), eye images at SteamVR's recommended size, and
-X4's settings kept apart for 2D and VR. X4's code is found by byte pattern, so small game updates
-keep working (`x4vr patterns` checks a build). **Not yet:** OpenXR.
+### What you need
 
-**Install** (any distribution: CMake, a C++20 compiler, the Vulkan headers and OpenVR's source;
-a Nix expression is included too):
+- X4: Foundations from Steam (the native Linux version), started once.
+- SteamVR with your headset working. Steam from your distribution or Valve, not the Flatpak.
+- To build: Git, plus either Nix (NixOS) or GCC 13+ / Clang 16+, CMake 3.24+ and the Vulkan
+  headers from your distribution (e.g. `vulkan-headers`, or `libvulkan-dev` on Debian and Ubuntu).
+
+### Install
+
+**With CMake (any distribution):**
 
 ```bash
-git clone https://github.com/Cully-Curwen/X4_VR_Linux ~/x4vr-src
-git clone --depth 1 https://github.com/ValveSoftware/openvr ~/x4vr-src/external/openvr
+git clone https://github.com/ToffelsKater/X4_VR.git ~/x4vr-src
 cd ~/x4vr-src
-cmake -S . -B build -DX4VR_LINUX=ON -DCMAKE_BUILD_TYPE=Release \
-      -DOPENVR_SOURCE_DIR=$PWD/external/openvr -DCMAKE_INSTALL_PREFIX=$HOME/.local
+cmake -S . -B build -DX4VR_LINUX=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local
 cmake --build build -j && cmake --install build
-~/.local/bin/x4vr
 ```
 
-The menu copies X4's launch option to paste in Steam, adds itself to the app launcher, and
-launches X4 in VR (starting SteamVR if needed). `x4vr-run` turns off Steam's own flat streaming
-of the game into the headset and Steam's overlay for X4 (both take X4's window away). Tiling
-window managers resize X4's window: make it floating (in VR its class is `X4VR`, 2D keeps `X4`).
+The first `cmake` downloads Valve's OpenVR sources (about 1 GB), which are built into the mod.
+The menu is then `~/.local/bin/x4vr`.
 
-**Streaming headsets (Steam Frame, and likely Steam Link):** SteamVR's link applies the left eye's
-pose to both eyes, so with alternate-eye rendering the right eye ghosts when you turn your head.
-The Linux port renders both eyes of a pair from one head pose (`shared_pose=1`, default), which
-removes it (docs/LINUX_FINDINGS.md). The Windows note about Quest over Steam Link above is
-probably the same effect.
+**With Nix (NixOS), from your channel's nixpkgs:**
+
+```bash
+git clone https://github.com/ToffelsKater/X4_VR.git ~/x4vr-src
+cd ~/x4vr-src
+nix-build linux/nix
+```
+
+The menu is then `~/x4vr-src/result/bin/x4vr`. To have it installed system-wide instead, add
+`(pkgs.callPackage /path/to/x4vr-src/linux/nix { })` to `environment.systemPackages`.
+
+To update either way: `git pull` in `~/x4vr-src`, then the same build commands again.
+
+### Setup and playing
+
+Run `x4vr` (see above for where it is). This terminal menu replaces the Windows launcher, and
+explains each item at the bottom of the screen.
+
+1. Choose *Copy the Steam launch option* and paste it into X4 > Properties > General > Launch
+   options. Steam's Play button still starts the normal game; only the menu starts VR.
+2. On a tiling window manager (Hyprland, Sway, i3), add the rule from *Tiling window manager
+   rules*.
+3. Choose *Launch X4 in VR*. It starts SteamVR if needed.
+4. Look straight ahead and press Ctrl+F12 to recenter. Ctrl+F11 switches to the flat screen.
+
+On a laptop with two GPUs, X4 must run on the same GPU as SteamVR (the dedicated one), else it
+runs flat. Put `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia` (NVIDIA) or
+`DRI_PRIME=1` (AMD or Intel Arc) in front of the launch option. The menu's *GPU* status line shows
+which GPU the last VR session used.
+
+The mod keeps your 2D X4 settings apart from the VR ones and puts them back when X4 closes. If
+something goes wrong, the log is `~/.local/state/x4vr/x4vr.log`, and *Make a bug report* packs it
+up for a GitHub issue.
+
+### Uninstall
+
+Choose *Uninstall* in the menu, clear X4's launch option in Steam, then delete the `~/x4vr-src`
+directory.
 
 ## License
 

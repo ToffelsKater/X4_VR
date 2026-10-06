@@ -1,14 +1,14 @@
-// VK_LAYER_X4VR: the Linux copy of src/observe_layer.cpp at commit 62569df (docs/LINUX_PORT_PLAN.md,
-// section 3). The alternate-eye presenter, the submission thread, theater mode, pacing and the stats
+// VK_LAYER_X4VR: the Linux copy of src/observe_layer.cpp at commit 62569df (docs/linux/ARCHITECTURE.md,
+// "Vulkan layer"). The alternate-eye presenter, the submission thread, theater mode, pacing and the stats
 // files are the Windows code. Changed for Linux:
 // - the layer is the whole mod (libx4vr.so): VR starts only in X4 (linux_port::is_x4_process), the
-//   library pins itself, and it starts the OpenTrack pose sender (pose_sender.cpp);
+//   library pins itself, and it starts the OpenTrack client (opentrack_client.cpp);
 // - private queue: a spare queue in the game's graphics family as on Windows; without one (AMD's
 //   RADV has a single graphics queue) the layer shares X4's graphics queue and serialises every use
 //   of it (SharedQueue below);
 // - left out: the Windows diagnostics (shader/pipeline capture, mapped-memory and native camera
-//   sampling, stack walks, the frame probe) and the mouse cursor overlay (X4 on Linux draws an X11
-//   cursor; capturing it is later work). Without camera sampling, turn compensation stays off
+//   sampling, stack walks, the frame probe) and the mouse cursor overlay: the cursor is read from
+//   X4's X11 window (x11_cursor.cpp) and drawn into the game image (draw_cursor). Without camera sampling, turn compensation stays off
 //   (it applies on foot only, which needs the on-foot patches anyway);
 // - Ctrl+F12 for the theater screen: the recenter= counter (x4vr ctl recenter) until hotkeys exist.
 #include "linux_runtime.hpp"
@@ -158,7 +158,7 @@ EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL x4vr_GetInstanceProcAddr(VkInsta
 EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL x4vr_GetDeviceProcAddr(VkDevice, const char*);
 
 namespace {
-VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks* alloc, VkInstance* output) {
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks* alloc, VkInstance* output) {
     auto* chain = link_info<VkLayerInstanceCreateInfo>(ci->pNext, VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO);
     if (!chain || !chain->u.pLayerInfo) return VK_ERROR_INITIALIZATION_FAILED;
     const auto gipa = chain->u.pLayerInfo->pfnNextGetInstanceProcAddr;
@@ -177,11 +177,15 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo* ci, co
             names = extensions->names();
             augmented.enabledExtensionCount = static_cast<uint32_t>(names.size());
             augmented.ppEnabledExtensionNames = names.data();
-            x4vr::linux_port::start_pose_sender();
+            x4vr::linux_port::start_opentrack_client();
         }
     } catch (const std::exception& error) {
         // No headset or no SteamVR: X4 runs flat, as without the mod.
         log(std::string("X4VR layer: VR runtime unavailable, X4 runs without VR: ")+error.what());
+        runtime.reset();
+        augmented = *ci;
+    } catch (...) {
+        log("X4VR layer: VR runtime unavailable, X4 runs without VR");
         runtime.reset();
         augmented = *ci;
     }
@@ -198,7 +202,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo* ci, co
     if (runtime) log("X4VR layer: instance created with extensions: "+join(augmented.enabledExtensionCount, augmented.ppEnabledExtensionNames));
     return result;
 }
-VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance instance, const VkAllocationCallbacks* alloc) {
+VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* alloc) {
     auto data = instance_for(instance); if (!data) return;
     const auto destroy = reinterpret_cast<PFN_vkDestroyInstance>(data->gipa(instance, "vkDestroyInstance"));
     { std::lock_guard lock(state_mutex); instances.erase(key(instance)); }
@@ -210,7 +214,7 @@ PFN_vkGetPhysicalDeviceProperties2 public_properties2() {
     void* loader = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_NOLOAD);
     return loader ? reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(dlsym(loader, "vkGetPhysicalDeviceProperties2")) : nullptr;
 }
-VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo* ci,
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo* ci,
                                             const VkAllocationCallbacks* alloc, VkDevice* output) {
     const auto parent = instance_for(physical); if (!parent) return VK_ERROR_INITIALIZATION_FAILED;
     auto* chain = link_info<VkLayerDeviceCreateInfo>(ci->pNext, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO);
@@ -285,6 +289,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
         runtime.reset();
         augmented = *ci;
         vr_family = UINT32_MAX; shared = false;
+    } catch (...) {
+        log("X4VR layer: VR disabled for this device");
+        runtime.reset();
+        augmented = *ci;
+        vr_family = UINT32_MAX; shared = false;
     }
     chain->u.pLayerInfo = chain->u.pLayerInfo->pNext;
     const auto result = create(physical, &augmented, alloc, output);
@@ -324,7 +333,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice physical, const VkD
 }
 void stop_submission(VkDevice device);
 namespace {
-VKAPI_ATTR void VKAPI_CALL DestroyDevice(VkDevice device, const VkAllocationCallbacks* alloc) {
+VKAPI_ATTR void VKAPI_CALL vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* alloc) {
     const auto data = device_for(device); if (!data) return;
     stop_submission(device); // it submits on this device's queue: X4 crashed on exit without this
     if (data->runtime) data->runtime->end_session(device);
@@ -431,6 +440,9 @@ void readback_prepare(const Device& d, VkDeviceSize size, VkBuffer& buffer, VkDe
         if ((need.memoryTypeBits & (1u << i)) && (d.memory_properties.memoryTypes[i].propertyFlags & wanted) == wanted) { allocate.memoryTypeIndex = i; break; }
     check(d.AllocateMemory(d.device, &allocate, nullptr, &memory), "readback memory");
     check(d.BindBufferMemory(d.device, buffer, memory, 0), "readback bind");
+}
+void dump_prepare(const Device& d, Presenter& p) {
+    readback_prepare(d, VkDeviceSize(p.eye_extent.width)*p.eye_extent.height*4*2, p.dump_buffer, p.dump_memory);
 }
 // Writes eye-0.raw / eye-1.raw (BGRA8, eye_extent) after the slot's fence signalled.
 void dump_write(const Device& d, Presenter& p, uint32_t slot) {
@@ -591,15 +603,18 @@ void draw_cursor(const Device& d, const Presenter& p, VkCommandBuffer command, V
                  const x4vr::linux_port::CursorState& c) {
     const int x0 = p.offset.x+int(std::lround(double(c.x)*p.placed.width/c.window_w))-int(c.xhot);
     const int y0 = p.offset.y+int(std::lround(double(c.y)*p.placed.height/c.window_h))-int(c.yhot);
+    // Only inside the game image: the border around it is never redrawn, so a cursor drawn there
+    // stayed (a trail at the image's edges).
+    const int left = p.offset.x, top = p.offset.y, right = left+int(p.placed.width), bottom = top+int(p.placed.height);
     std::vector<VkBufferImageCopy> regions;
     for (uint32_t row = 0; row < c.height; ++row) {
         const int y = y0+int(row);
-        if (y < 0 || y >= int(p.eye_extent.height)) continue;
+        if (y < top || y >= bottom) continue;
         for (uint32_t col = 0; col < c.width;) {
             if ((c.bgra[size_t(row)*c.width+col] >> 24) < 128) { ++col; continue; }
             uint32_t end = col;
             while (end < c.width && (c.bgra[size_t(row)*c.width+end] >> 24) >= 128) ++end;
-            const int from = std::max(x0+int(col), 0), to = std::min(x0+int(end), int(p.eye_extent.width));
+            const int from = std::max(x0+int(col), left), to = std::min(x0+int(end), right);
             if (from < to) {
                 VkBufferImageCopy r{};
                 r.bufferOffset = (VkDeviceSize(row)*c.width+uint32_t(from-x0))*4;
@@ -628,7 +643,7 @@ VkSemaphore presenter_copy(const Device& d, VkQueue queue, const VkPresentInfoKH
     const auto settings = x4vr::stereo_settings();
     const auto number = x4vr::next_present();
     {
-        // Stage C check: X4's frame half should flip on every present (logged after 1000, then every 20000).
+        // Frame-half check: X4's frame half should flip on every present (logged after 1000, then every 20000).
         static int last_half = -1;
         static uint64_t seen{}, flips{};
         const int half = x4vr::frame_half();
@@ -723,7 +738,7 @@ VkSemaphore presenter_copy(const Device& d, VkQueue queue, const VkPresentInfoKH
             VK_ACCESS_TRANSFER_READ_BIT, 0);
     p.dump_pending = false;
     if (p.has_image(0) && p.has_image(1) && x4vr::take_request("dump.txt")) {
-        if (!p.dump_buffer) readback_prepare(d, VkDeviceSize(p.eye_extent.width)*p.eye_extent.height*4*2, p.dump_buffer, p.dump_memory);
+        if (!p.dump_buffer) dump_prepare(d, p);
         for (uint32_t i = 0; i < 2; ++i) {
             VkBufferImageCopy region{};
             region.bufferOffset = VkDeviceSize(i)*p.eye_extent.width*p.eye_extent.height*4;
@@ -773,7 +788,7 @@ void pair_stats(const x4vr::StereoSettings& s, std::array<bool, 2> fresh, double
     out << milliseconds() << ' ' << t.submits << ' ' << t.stale[0] << ' ' << t.stale[1] << ' ' << t.late << ' ' << t.failed << ' '
         << t.fallbacks << ' ' << std::fixed << std::setprecision(2) << 1000*t.blocked/t.submits << ' ' << 1000*t.blocked_max << ' '
         << 1000*t.interval_max << ' ' << 1000*t.waited_max << ' ' << 1000*t.submit_max << ' ' << late-late_seen << ' ' << t.resubmits
-        << " | " << s.async_submit << ' ' << s.pair << ' ' << s.pair_wait << ' ' << s.half_xor_render << ' ' << s.half_xor_present
+        << " | " << async_submit(s) << ' ' << s.pair << ' ' << s.pair_wait << ' ' << s.half_xor_render << ' ' << s.half_xor_present
         << ' ' << s.handoff << ' ' << s.release_late << '\n';
     x4vr::write_file_later(capture_root()/"pair_stats.txt", out.str(), true);
     t = {}; start = now; late_seen = late;
@@ -891,8 +906,10 @@ std::unique_ptr<x4vr::EyeTargets> make_black(const Device& d, VkExtent2D extent,
     d.DestroyCommandPool(d.device, pool, nullptr);
     return black;
 }
-// Linux: SteamVR accepts the theater overlay but never shows it (black), so the virtual screen is
-// drawn into the eye textures instead: the flat image, theater_width wide and theater_distance
+// Linux: the virtual screen is drawn into the eye textures instead of a SteamVR overlay. On the
+// Steam Frame the overlay first showed nothing (black); once it showed, it shimmered: SteamVR
+// shrinks the ~2800 px image to the headset's pixels every display frame without mipmaps, while
+// this shrinks it once per game frame. Drawn: the flat image, theater_width wide and theater_distance
 // ahead, submitted with the head pose of when the screen was placed. SteamVR's reprojection then
 // keeps it fixed in space while the head moves. X4VR_THEATER_OVERLAY=1 uses the overlay again.
 // The part of the screen inside one eye's frustum, as blit rectangles (source in the game image,
@@ -1115,10 +1132,11 @@ void compositor_loop(Device d) {
                     newest_seq[e] = p.slot_seq[e][newest[e]];
                     // Fallback: the newest finished image other than the newest one. When the GPU runs
                     // behind, every newest image is still in flight at submit time; the one that was late
-                    // last tick is shown now instead of repeating the same image forever.
+                    // last tick is shown now instead of repeating the same image forever. Linux: older than
+                    // the chosen one (with the shared pose that may not be the newest).
                     older[e] = UINT32_MAX;
                     for (uint32_t k = 0; k < Presenter::ring_size; ++k)
-                        if (k != newest[e] && p.filled[e][k] && (older[e] == UINT32_MAX || p.slot_seq[e][k] > p.slot_seq[e][older[e]]) &&
+                        if (k != newest[e] && p.filled[e][k] && p.slot_seq[e][k] < p.slot_seq[e][newest[e]] && (older[e] == UINT32_MAX || p.slot_seq[e][k] > p.slot_seq[e][older[e]]) &&
                             d.GetFenceStatus(d.device, p.written[e][k]) == VK_SUCCESS) older[e] = k;
                     if (older[e] != UINT32_MAX) {
                         p.held[e][older[e]] = true;
@@ -1208,17 +1226,21 @@ void compositor_loop(Device d) {
             }
         }
         const auto submitted_at = std::chrono::steady_clock::now();
-        auto& pending = reads[submissions++ % reads.size()];
-        {
-            // The runtime's Submit records its copies on the VR queue: hold it if shared.
+        // The runtime's Submit records its copies on the VR queue: hold it if shared (only for the
+        // submits: X4's own submits and presents wait behind the lock).
+        if (error.empty()) {
             const auto queue_lock = lock_vr_queue(d);
-            if (error.empty()) error = d.runtime->submit_frame(last.textures, last.bounds, last.poses, last.with_pose, s.handoff, &record.marks);
-            // ponytail: reuses a fence 4 submissions (~44 ms) old; waits only if the GPU is that far behind
-            check(d.WaitForFences(d.device, 1, &pending.fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
-            check(d.ResetFences(d.device, 1, &pending.fence), "vkResetFences");
-            check(d.QueueSubmit(d.vr_queue, 0, nullptr, pending.fence), "vkQueueSubmit");
+            error = d.runtime->submit_frame(last.textures, last.bounds, last.poses, last.with_pose, s.handoff, &record.marks);
         }
         const auto submitting = std::chrono::duration<double>(std::chrono::steady_clock::now()-submitted_at).count();
+        auto& pending = reads[submissions++ % reads.size()];
+        // ponytail: reuses a fence 4 submissions (~44 ms) old; waits only if the GPU is that far behind
+        check(d.WaitForFences(d.device, 1, &pending.fence, VK_TRUE, UINT64_MAX), "vkWaitForFences");
+        check(d.ResetFences(d.device, 1, &pending.fence), "vkResetFences");
+        {
+            const auto queue_lock = lock_vr_queue(d);
+            check(d.QueueSubmit(d.vr_queue, 0, nullptr, pending.fence), "vkQueueSubmit");
+        }
         pending.slots = last.slots; pending.generation = last.generation;
         if (!resubmit) {
             // Keep only the images now on screen or still being read. Busy: they stay held until next tick.
@@ -1288,7 +1310,7 @@ void presenter_submit(const Device& d, VkQueue queue) {
     p.fresh = {};
     report_submit(error);
 }
-VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchain(VkDevice device, const VkSwapchainCreateInfoKHR* ci,
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* ci,
                                                const VkAllocationCallbacks* alloc, VkSwapchainKHR* output) {
     const auto data = device_for(device); if (!data || !data->CreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
     const auto result = data->CreateSwapchainKHR(device, ci, alloc, output);
@@ -1315,20 +1337,21 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateSwapchain(VkDevice device, const VkSwapchai
     } catch (...) {}
     return result;
 }
-VKAPI_ATTR void VKAPI_CALL GetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue* queue) {
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue* queue) {
     const auto data = device_for(device); if (!data || !data->GetDeviceQueue) return;
     data->GetDeviceQueue(device, family, index, queue);
     if (*queue) { auto& p = presenter(); std::lock_guard lock(p.families_mutex); p.families[*queue] = family; }
 }
-VKAPI_ATTR void VKAPI_CALL GetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2* info, VkQueue* queue) {
+VKAPI_ATTR void VKAPI_CALL vkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2* info, VkQueue* queue) {
     const auto data = device_for(device); if (!data || !data->GetDeviceQueue2) return;
     data->GetDeviceQueue2(device, info, queue);
     if (*queue) { auto& p = presenter(); std::lock_guard lock(p.families_mutex); p.families[*queue] = info->queueFamilyIndex; }
 }
-VKAPI_ATTR VkResult VKAPI_CALL QueuePresent(VkQueue queue, const VkPresentInfoKHR* info) {
+VKAPI_ATTR VkResult VKAPI_CALL vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* info) {
     const auto data = device_for(queue); if (!data || !data->QueuePresentKHR) return VK_ERROR_INITIALIZATION_FAILED;
+    // X4's main thread; outside the queue lock: X4's own functions shouldn't wait under it.
+    if (data->runtime) x4vr::linux_port::sample_game_state();
     auto queue_lock = lock_if_shared(queue); // before the presenter lock, as everywhere
-    if (data->runtime) x4vr::linux_port::sample_game_state(); // X4's main thread
     auto& p = presenter();
     std::unique_lock lock(p.mutex);
     VkSemaphore copied{};
@@ -1363,53 +1386,53 @@ VKAPI_ATTR VkResult VKAPI_CALL QueuePresent(VkQueue queue, const VkPresentInfoKH
     return result;
 }
 // The shared queue: X4's other uses of it, serialised with the layer's and the runtime's.
-VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t count, const VkSubmitInfo* submits, VkFence fence) {
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(VkQueue queue, uint32_t count, const VkSubmitInfo* submits, VkFence fence) {
     const auto data = device_for(queue); if (!data || !data->QueueSubmit) return VK_ERROR_INITIALIZATION_FAILED;
     const auto lock = lock_if_shared(queue);
     return data->QueueSubmit(queue, count, submits, fence);
 }
-VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2(VkQueue queue, uint32_t count, const VkSubmitInfo2* submits, VkFence fence) {
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2(VkQueue queue, uint32_t count, const VkSubmitInfo2* submits, VkFence fence) {
     const auto data = device_for(queue); if (!data || !data->QueueSubmit2) return VK_ERROR_INITIALIZATION_FAILED;
     const auto lock = lock_if_shared(queue);
     return data->QueueSubmit2(queue, count, submits, fence);
 }
-VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit2KHR(VkQueue queue, uint32_t count, const VkSubmitInfo2* submits, VkFence fence) {
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2KHR(VkQueue queue, uint32_t count, const VkSubmitInfo2* submits, VkFence fence) {
     const auto data = device_for(queue); if (!data || !data->QueueSubmit2KHR) return VK_ERROR_INITIALIZATION_FAILED;
     const auto lock = lock_if_shared(queue);
     return data->QueueSubmit2KHR(queue, count, submits, fence);
 }
-VKAPI_ATTR VkResult VKAPI_CALL QueueBindSparse(VkQueue queue, uint32_t count, const VkBindSparseInfo* info, VkFence fence) {
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueBindSparse(VkQueue queue, uint32_t count, const VkBindSparseInfo* info, VkFence fence) {
     const auto data = device_for(queue); if (!data || !data->QueueBindSparse) return VK_ERROR_INITIALIZATION_FAILED;
     const auto lock = lock_if_shared(queue);
     return data->QueueBindSparse(queue, count, info, fence);
 }
-VKAPI_ATTR VkResult VKAPI_CALL QueueWaitIdle(VkQueue queue) {
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueWaitIdle(VkQueue queue) {
     const auto data = device_for(queue); if (!data || !data->QueueWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
     const auto lock = lock_if_shared(queue);
     return data->QueueWaitIdle(queue);
 }
-VKAPI_ATTR VkResult VKAPI_CALL DeviceWaitIdle(VkDevice device) {
+VKAPI_ATTR VkResult VKAPI_CALL vkDeviceWaitIdle(VkDevice device) {
     const auto data = device_for(device); if (!data || !data->DeviceWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
     const auto lock = data->vr_queue_shared ? std::unique_lock(shared_queue) : std::unique_lock<std::recursive_mutex>();
     return data->DeviceWaitIdle(device);
 }
 PFN_vkVoidFunction device_intercept(const char* name) {
 #define MATCH(fn, impl) if (!std::strcmp(name, "vk" #fn)) return reinterpret_cast<PFN_vkVoidFunction>(impl);
-    MATCH(DestroyDevice, DestroyDevice) MATCH(CreateSwapchainKHR, CreateSwapchain) MATCH(QueuePresentKHR, QueuePresent)
-    MATCH(GetDeviceQueue, GetDeviceQueue) MATCH(GetDeviceQueue2, GetDeviceQueue2)
-    MATCH(QueueSubmit, QueueSubmit) MATCH(QueueSubmit2, QueueSubmit2) MATCH(QueueSubmit2KHR, QueueSubmit2KHR)
-    MATCH(QueueBindSparse, QueueBindSparse) MATCH(QueueWaitIdle, QueueWaitIdle) MATCH(DeviceWaitIdle, DeviceWaitIdle)
+    MATCH(DestroyDevice, vkDestroyDevice) MATCH(CreateSwapchainKHR, vkCreateSwapchainKHR) MATCH(QueuePresentKHR, vkQueuePresentKHR)
+    MATCH(GetDeviceQueue, vkGetDeviceQueue) MATCH(GetDeviceQueue2, vkGetDeviceQueue2)
+    MATCH(QueueSubmit, vkQueueSubmit) MATCH(QueueSubmit2, vkQueueSubmit2) MATCH(QueueSubmit2KHR, vkQueueSubmit2KHR)
+    MATCH(QueueBindSparse, vkQueueBindSparse) MATCH(QueueWaitIdle, vkQueueWaitIdle) MATCH(DeviceWaitIdle, vkDeviceWaitIdle)
     return nullptr;
 }
 }
 EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL x4vr_GetInstanceProcAddr(VkInstance instance, const char* name) {
     if (!name) return nullptr;
     if (!std::strcmp(name, "vkGetInstanceProcAddr")) return reinterpret_cast<PFN_vkVoidFunction>(x4vr_GetInstanceProcAddr);
-    if (!std::strcmp(name, "vkCreateInstance")) return reinterpret_cast<PFN_vkVoidFunction>(CreateInstance);
+    if (!std::strcmp(name, "vkCreateInstance")) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateInstance);
     if (!instance) return nullptr;
     if (!std::strcmp(name, "vkGetDeviceProcAddr")) return reinterpret_cast<PFN_vkVoidFunction>(x4vr_GetDeviceProcAddr);
-    if (!std::strcmp(name, "vkDestroyInstance")) return reinterpret_cast<PFN_vkVoidFunction>(DestroyInstance);
-    if (!std::strcmp(name, "vkCreateDevice")) return reinterpret_cast<PFN_vkVoidFunction>(CreateDevice);
+    if (!std::strcmp(name, "vkDestroyInstance")) return reinterpret_cast<PFN_vkVoidFunction>(vkDestroyInstance);
+    if (!std::strcmp(name, "vkCreateDevice")) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateDevice);
     const auto data = instance_for(instance); if (!data) return nullptr;
     const auto next = data->gipa(instance, name);
     if (next) if (const auto intercepted = device_intercept(name)) return intercepted;
@@ -1424,7 +1447,7 @@ EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL x4vr_GetDeviceProcAddr(VkDevice 
     return next;
 }
 namespace {
-VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL GetPhysicalDeviceProcAddr(VkInstance instance, const char* name) {
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetPhysicalDeviceProcAddr(VkInstance instance, const char* name) {
     if (!name || !instance) return nullptr;
     const auto data = instance_for(instance);
     return data && data->gpdpa ? data->gpdpa(instance, name) : nullptr;
@@ -1436,6 +1459,6 @@ EXPORT VKAPI_ATTR VkResult VKAPI_CALL x4vrNegotiateLoaderLayerInterfaceVersion(V
     info->loaderLayerInterfaceVersion = 2;
     info->pfnGetInstanceProcAddr = x4vr_GetInstanceProcAddr;
     info->pfnGetDeviceProcAddr = x4vr_GetDeviceProcAddr;
-    info->pfnGetPhysicalDeviceProcAddr = GetPhysicalDeviceProcAddr;
+    info->pfnGetPhysicalDeviceProcAddr = vkGetPhysicalDeviceProcAddr;
     return VK_SUCCESS;
 }

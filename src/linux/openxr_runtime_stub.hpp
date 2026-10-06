@@ -1,6 +1,6 @@
 #pragma once
-// The Linux build has no OpenXR backend yet (docs/LINUX_PORT_PLAN.md: SteamVR through OpenVR
-// first). RuntimeBootstrap holds an OpenXRRuntime pointer; this stand-in lets the Linux copy of
+// The Linux build has no OpenXR backend yet (docs/linux/FEATURE_COMPARISON.md: SteamVR through OpenVR;
+// OpenXR missing). RuntimeBootstrap holds an OpenXRRuntime pointer; this stand-in lets the Linux copy of
 // runtime_bootstrap.cpp keep the Windows code paths unchanged. It is never constructed: with
 // X4VR_RUNTIME=openxr the Linux runtime logs that OpenXR isn't built and uses OpenVR.
 // A Linux copy of src/openxr_runtime.cpp (XR_KHR_convert_timespec_time instead of the Win32
