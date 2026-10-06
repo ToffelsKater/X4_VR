@@ -11,7 +11,7 @@ let
 in
 pkgs.stdenv.mkDerivation {
   pname = "x4vr";
-  version = "0.2.0";
+  version = "0.4.0"; # the release this builds on (upstream tags)
 
   # The source nix-build copies into the store: the whole repository (Windows parts too; the
   # Linux CMake build only compiles its own and the shared files), minus .git, editor and build

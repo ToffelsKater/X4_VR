@@ -362,6 +362,9 @@ display settings.
 
 ## Linux (native X4, experimental)
 
+> **Experimental.** Tested on one setup so far (Steam Frame, AMD GPU, X4 9.00). Expect rough
+> edges, and please report what you find.
+
 A port for the native Linux version of X4 9.00, through SteamVR. It covers stereo in the cockpit
 and on foot, head tracking, the virtual screen for menus, the mouse cursor and the HUD distance.
 OpenXR isn't supported on Linux yet. It was tested with a Steam Frame on an AMD GPU. NVIDIA and

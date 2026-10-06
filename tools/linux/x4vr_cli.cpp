@@ -593,9 +593,13 @@ std::string make_report() {
     std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
     const char* home = std::getenv("HOME");
     const auto out = std::filesystem::path(home ? home : ".")/("x4vr-report-"+std::string(stamp)+".tar.gz");
-    const auto staging = std::filesystem::temp_directory_path()/("x4vr-report-"+std::string(stamp));
+    // A new directory only this user can read (mkdtemp: 0700, a name nobody could create first):
+    // the logs and X4's config.xml are staged in it.
+    std::string pattern = (std::filesystem::temp_directory_path()/"x4vr-report-XXXXXX").string();
+    if (!mkdtemp(pattern.data())) return {};
+    const std::filesystem::path root = pattern, staging = root/"report";
     std::error_code error;
-    std::filesystem::create_directories(staging, error);
+    std::filesystem::create_directory(staging, error);
     for (const auto* name : {"x4vr.log", "x4vr.previous.log", "stderr.log", "stderr.previous.log", "stereo.txt", "x4_resolution.txt", "pair_stats.txt"})
         std::filesystem::copy_file(state_dir()/name, staging/name, error), error.clear();
     if (const auto config = x4_config(); !config.empty()) std::filesystem::copy_file(config, staging/"x4-config.xml", error), error.clear();
@@ -611,11 +615,13 @@ std::string make_report() {
     summary << "gpu: " << gpu_summary(gpu_state) << "\n";
     if (const auto game = game_dir(); !game.empty() && std::filesystem::exists(game/"X4")) {
         summary << "x4 scan (" << (game/"X4").string() << "):\n";
-        for (const auto& note : x4vr::linux_port::code::find_x4_sites(x4vr::elf::Image::load((game/"X4").string())).notes) summary << "  " << note << "\n";
+        try {
+            for (const auto& note : x4vr::linux_port::code::find_x4_sites(x4vr::elf::Image::load((game/"X4").string())).notes) summary << "  " << note << "\n";
+        } catch (const std::exception& e) { summary << "  " << e.what() << "\n"; }
     }
     write_text(staging/"summary.txt", summary.str());
-    const bool ok = run({"tar", "czf", out.string(), "-C", staging.string(), "."}, {.log = staging.parent_path()/"x4vr-report-tar.log"});
-    std::filesystem::remove_all(staging, error);
+    const bool ok = run({"tar", "czf", out.string(), "-C", staging.string(), "."}, {.log = root/"tar.log"});
+    std::filesystem::remove_all(root, error);
     return ok ? out.string() : std::string();
 }
 constexpr const char* issues_url = "https://github.com/ToffelsKater/X4_VR/issues/new";
