@@ -457,6 +457,14 @@ Presenter& presenter() { static auto* value = new Presenter; return *value; }
 }
 void compositor_loop(Device d);
 namespace {
+// async_submit as it was at X4's first frame: switching while X4 runs froze the headset's image.
+// The OpenVR session belongs to the thread that submits, and it can't move to another thread
+// once frames went through it (Session::adopt_bootstrap_thread), so a switch either way stopped
+// all submissions. The menu marks it "next launch".
+bool async_submit(const x4vr::StereoSettings& s) {
+    static const bool at_start = s.async_submit;
+    return at_start;
+}
 void presenter_initialize(const Device& d, uint32_t family) {
     auto& p = presenter();
     const auto memory = reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(d.gipa(d.instance, "vkGetPhysicalDeviceMemoryProperties"));
@@ -640,7 +648,7 @@ VkSemaphore presenter_copy(const Device& d, VkQueue queue, const VkPresentInfoKH
     if (!update_theater(p, settings, posed, flat)) return VK_NULL_HANDLE; // skip frame
     if (!settings.stereo || p.theater) eye = 0;
     p.last_eye = eye;
-    p.async_frame = settings.async_submit && settings.pace && d.vr_queue && d.vr_family == family;
+    p.async_frame = async_submit(settings) && settings.pace && d.vr_queue && d.vr_family == family;
     constexpr auto ring = Presenter::ring_size;
     std::array<uint32_t, 2> slot_of{UINT32_MAX, UINT32_MAX}; // ring image each written eye goes to
     for (uint32_t target = 0; target < 2; ++target) {
@@ -1043,7 +1051,7 @@ void compositor_loop(Device d) {
     uint64_t pairs_matched{}, pairs_differing{}, pairs_total{}; // shared pose statistics, logged every 4000 stereo submits
     while (!p.stopping) try {
         const auto s = x4vr::stereo_settings();
-        if (!s.async_submit || !s.pace) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
+        if (!async_submit(s) || !s.pace) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
         if (std::unique_lock lock(p.mutex, std::chrono::milliseconds(1)); lock) { // busy: keep the last state
             theater = p.theater;
             ready = p.ready && p.async_frame && p.has_image(0) && (theater || p.has_image(1));

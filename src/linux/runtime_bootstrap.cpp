@@ -50,7 +50,31 @@ RuntimeBootstrap::RuntimeBootstrap() {
     if (const char* backend = std::getenv("X4VR_RUNTIME"); backend && !strcasecmp(backend, "openxr"))
         linux_port::log("X4VR bootstrap: OpenXR is not built on Linux yet; using OpenVR");
     linux_port::log("X4VR bootstrap: initialize begin");
-    session_.initialize();
+    // SteamVR can be running before the headset is: a wireless one (Steam Frame) connects some
+    // seconds after SteamVR starts, a wired one may still be off. VR_Init then fails and X4 would
+    // run without VR, so wait for the headset, up to X4VR_HEADSET_WAIT seconds (default 120,
+    // 0: don't wait). Only failed VR_Init calls repeat: nothing is loaded or shut down meanwhile.
+    // Linux only: the Windows launcher's Play starts X4 once SteamVR is ready.
+    const char* wait_text = std::getenv("X4VR_HEADSET_WAIT");
+    const int wait = wait_text && *wait_text ? std::atoi(wait_text) : 120;
+    const auto deadline = std::chrono::steady_clock::now()+std::chrono::seconds(std::max(wait, 0));
+    for (bool waiting = false;;) {
+        try {
+            session_.initialize();
+            if (waiting) linux_port::log("X4VR bootstrap: headset connected");
+            break;
+        } catch (const std::runtime_error& error) {
+            // OpenVR's text ends in the error code: 108 HMD not found, 126 not found (presence
+            // failed), 215 wireless HMD not connected yet.
+            const std::string what = error.what();
+            const bool no_headset_yet = what.find("(108)") != std::string::npos || what.find("(126)") != std::string::npos ||
+                                        what.find("(215)") != std::string::npos;
+            if (!no_headset_yet || std::chrono::steady_clock::now() >= deadline) throw;
+            if (!waiting) linux_port::log("X4VR bootstrap: waiting up to "+std::to_string(wait)+" s for the headset: "+what);
+            waiting = true;
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
     linux_port::log("X4VR bootstrap: initialize complete");
 }
 RuntimeBootstrap::~RuntimeBootstrap() {

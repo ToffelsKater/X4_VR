@@ -1,5 +1,7 @@
 # Linux port: first headset test (Phase 1, stage A)
 
+> Historical: the first test of 2026-10-04. To install and play, see [LINUX_GUIDE.md](LINUX_GUIDE.md).
+
 What this build does: X4 in the Steam Frame through SteamVR, head tracking through X4's OpenTrack
 input, alternate-eye stereo, menus on a virtual screen. Known limits of stage A (plan section 7):
 

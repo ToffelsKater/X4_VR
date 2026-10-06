@@ -1,0 +1,13 @@
+# x4vr profile (built in): Steam Frame through SteamVR. Its link reprojects both eyes with the
+# left eye's pose, so both eyes of a pair are submitted with one pose (shared_pose).
+stereo=1
+shared_pose=1
+ipd_scale=1
+predict=0.035
+async_submit=1
+cursor=1
+theater=1
+theater_distance=2
+theater_width=2.2
+x4_width=0
+x4_height=0

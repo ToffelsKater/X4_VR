@@ -44,6 +44,9 @@ target_compile_options(x4vr_elf PRIVATE ${X4VR_WARNINGS})
 add_executable(x4vr ${X4VR_ROOT}/tools/linux/x4vr_cli.cpp)
 target_link_libraries(x4vr PRIVATE x4vr_vr x4vr_elf)
 target_compile_options(x4vr PRIVATE ${X4VR_WARNINGS})
+# For uninstalling: the library folder under the install prefix (lib or lib64) and the source
+# folder this was built from (shown, never deleted).
+target_compile_definitions(x4vr PRIVATE X4VR_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}" X4VR_SOURCE_DIR="${X4VR_ROOT}")
 
 # The mod: Vulkan layer, VR runtime and OpenTrack pose sender in one library, loaded into X4 by
 # the Vulkan loader (x4vr-run). Its own copy of the C++ runtime, nothing exported but the layer's
@@ -93,7 +96,8 @@ install(TARGETS x4vr_mod x4vr_probe VkLayer_x4vr_probe LIBRARY DESTINATION ${CMA
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/install/VkLayer_x4vr.json ${CMAKE_CURRENT_BINARY_DIR}/install/VkLayer_x4vr_probe.json
         DESTINATION ${CMAKE_INSTALL_DATADIR}/vulkan/explicit_layer.d)
 install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/x4vr-run ${CMAKE_CURRENT_BINARY_DIR}/x4vr-probe-run DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES ${X4VR_ROOT}/config/linux/stereo.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/x4vr)
+install(FILES ${X4VR_ROOT}/config/linux/stereo.txt ${X4VR_ROOT}/config/linux/notices.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/x4vr)
+install(DIRECTORY ${X4VR_ROOT}/config/linux/profiles/ DESTINATION ${CMAKE_INSTALL_DATADIR}/x4vr/profiles)
 
 if(BUILD_TESTING) # include(CTest) is in the top-level CMakeLists.txt, so ctest finds these
   # Existing suites from tests/ that are platform-independent, built as they are. The others need
@@ -137,6 +141,11 @@ if(BUILD_TESTING) # include(CTest) is in the top-level CMakeLists.txt, so ctest 
   target_compile_options(code_scan_tests PRIVATE ${X4VR_WARNINGS} -fno-pie -O2 -fcf-protection=none) # X4: no endbr64
   target_link_options(code_scan_tests PRIVATE -no-pie)
   add_test(NAME code_scan COMMAND code_scan_tests)
+
+  add_executable(steam_config_tests ${X4VR_ROOT}/tests/linux/steam_config_tests.cpp)
+  target_include_directories(steam_config_tests PRIVATE ${X4VR_ROOT}/tools/linux)
+  target_compile_options(steam_config_tests PRIVATE ${X4VR_WARNINGS})
+  add_test(NAME steam_config COMMAND steam_config_tests)
 
   add_executable(probe_socket_fixture ${X4VR_ROOT}/tests/linux/probe_socket_fixture.cpp)
   target_include_directories(probe_socket_fixture PRIVATE ${X4VR_ROOT}/src/linux)
