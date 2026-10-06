@@ -20,6 +20,10 @@ This is an unofficial fan project. It is not affiliated with or endorsed by Egos
 > jitters when you turn your head, with both the OpenVR and the OpenXR option. See
 > [Limitations](#limitations).
 
+> [!NOTE]
+> Linux: a native port for the Linux version of X4 is in progress, see
+> [Linux (native X4, experimental)](#linux-native-x4-experimental).
+
 ## What works
 
 - Flying from the cockpit in stereo with full head tracking. The world, the cockpit and the HUD
@@ -355,6 +359,41 @@ powershell -ExecutionPolicy Bypass -File X4_VR\scripts\uninstall.ps1
 This restores or removes the FreeTrack registry value and removes the HUD distance extension.
 Then delete the `X4_VR` folder. If you like, set OpenTrack Support back to Off and restore your
 display settings.
+
+## Linux (native X4, experimental)
+
+A port for the native Linux build of X4 (9.00), developed alongside the Windows mod: the Windows
+build is unchanged, and the Linux one is opt-in (`-DX4VR_LINUX=ON`). Tested with a Steam Frame
+through SteamVR on an AMD GPU (RADV), Hyprland and NixOS. The full guide is
+[docs/LINUX_PHASE1_TEST.md](docs/LINUX_PHASE1_TEST.md); the design and open items are in
+[docs/LINUX_PORT_PLAN.md](docs/LINUX_PORT_PLAN.md), measurements in
+[docs/LINUX_FINDINGS.md](docs/LINUX_FINDINGS.md).
+
+**What works:** stereo in the cockpit with head tracking and the eye chosen when X4 reads the
+pose (as on Windows), the virtual screen for menus, the mouse cursor, Ctrl+F12 / Ctrl+F11 and
+SteamVR's recentre, X4's settings and resolution set before each start, eye images at SteamVR's
+recommended size.
+
+**Not yet:** walking on foot (the virtual screen is shown instead), leaning back (X4 still clamps
+backward head movement), OpenXR, and the HUD distance only moves the HUD back (it also shrinks).
+
+**Install** (Nix, no flakes; other distributions: CMake with `-DX4VR_LINUX=ON` and OpenVR's source):
+
+```bash
+git clone https://github.com/Cully-Curwen/X4_VR_Linux ~/code/X4_VR_Linux
+cd ~/code/X4_VR_Linux && nix-build
+```
+
+Then set X4's launch option in Steam to `/home/<you>/code/X4_VR_Linux/result/bin/x4vr-run %command%`,
+start SteamVR with the headset, and start X4 from Steam on the PC. `x4vr-run` turns off Steam's
+own flat streaming of the game into the headset and Steam's overlay for X4 (both take X4's window
+away), and sets X4's settings for VR. Tiling window managers resize X4's window: make it floating.
+
+**Streaming headsets (Steam Frame, and likely Steam Link):** SteamVR's link applies the left eye's
+pose to both eyes, so with alternate-eye rendering the right eye ghosts when you turn your head.
+The Linux port renders both eyes of a pair from one head pose (`shared_pose=1`, default), which
+removes it (docs/LINUX_FINDINGS.md). The Windows note about Quest over Steam Link above is
+probably the same effect.
 
 ## License
 

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# X4 VR launcher for Linux (docs/LINUX_PORT_PLAN.md, section 9.1). Use it as X4's Steam launch option:
+#
+#   /full/path/to/x4vr-run %command%
+#
+# Start SteamVR with the headset first (on Linux it doesn't start on its own). Without SteamVR,
+# X4 runs flat as without the mod. Remove the launch option to go back to a normal start.
+#
+# Settings: $X4VR_DIR/stereo.txt (default ~/.local/state/x4vr), created from the defaults on first
+# use and re-read every half second while X4 runs. Log: $X4VR_DIR/x4vr.log (previous run:
+# x4vr.previous.log). Recentre / flat screen: `x4vr ctl recenter`, `x4vr ctl flat`.
+set -u
+if [ $# -eq 0 ]; then
+    echo "usage: x4vr-run <game command>   (Steam launch option: x4vr-run %command%)" >&2
+    exit 2
+fi
+dir="${X4VR_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/x4vr}"
+mkdir -p "$dir"
+[ -f "$dir/stereo.txt" ] || cp "@CMAKE_INSTALL_FULL_DATADIR@/x4vr/stereo.txt" "$dir/stereo.txt"
+chmod u+w "$dir/stereo.txt" 2>/dev/null
+for log in x4vr stderr; do [ -f "$dir/$log.log" ] && mv -f "$dir/$log.log" "$dir/$log.previous.log"; done
+
+# With SteamVR running, Steam launches non-VR games "streamed" onto a virtual screen in the headset
+# and takes over their window; X4 then loses it ("Invalid window") and quits. The mod renders to
+# SteamVR itself, so X4 must start as a normal desktop game.
+unset StreamForOpenVR SteamStreamingVRPairedInvite
+# Steam's overlay (preloaded gameoverlayrenderer.so and its Vulkan layer) also captures the game
+# for that stream; with it loaded X4 quits as soon as the mod submits its first frame.
+# X4VR_STEAM_OVERLAY=1 keeps it.
+if [ "${X4VR_STEAM_OVERLAY:-0}" != 1 ]; then
+    preload=
+    IFS=': ' read -r -a libs <<< "${LD_PRELOAD-}" # entries separated by colons or spaces
+    for lib in "${libs[@]}"; do
+        case "$lib" in *gameoverlayrenderer.so) ;; *) preload="${preload:+$preload:}$lib" ;; esac
+    done
+    if [ -n "$preload" ]; then export LD_PRELOAD="$preload"; else unset LD_PRELOAD; fi
+    export DISABLE_VK_LAYER_VALVE_steam_overlay_1=1
+fi
+export X4VR_CAPTURE_DIR="$dir"
+export X4VR_RUNTIME="${X4VR_RUNTIME:-openvr}"
+export VK_ADD_LAYER_PATH="@CMAKE_INSTALL_FULL_DATADIR@/vulkan/explicit_layer.d${VK_ADD_LAYER_PATH:+:$VK_ADD_LAYER_PATH}"
+export VK_INSTANCE_LAYERS="VK_LAYER_X4VR${VK_INSTANCE_LAYERS:+:$VK_INSTANCE_LAYERS}"
+export VK_LOADER_LAYERS_ENABLE="VK_LAYER_X4VR${VK_LOADER_LAYERS_ENABLE:+,$VK_LOADER_LAYERS_ENABLE}"
+export VK_LOADER_DEBUG="${VK_LOADER_DEBUG:-error,warn}"
+{
+    echo "== $(date '+%F %T') x4vr-run"
+    if pgrep -x vrserver >/dev/null 2>&1 || pgrep -f 'bin/linux64/vrserver' >/dev/null 2>&1; then
+        echo "SteamVR is running"
+    else
+        echo "WARNING: SteamVR doesn't seem to be running; X4 will run without VR. Start SteamVR first."
+    fi
+    echo "command: $*"
+} >> "$dir/x4vr.log"
+# X4's settings for VR (FOV, anti-aliasing, upscaling, VSync, frame limit, OpenTrack), fixed in its
+# config.xml while X4 isn't running yet. X4VR_FIX_SETTINGS=0 leaves config.xml alone.
+if [ "${X4VR_FIX_SETTINGS:-1}" != 0 ]; then
+    "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" fix-settings --auto >> "$dir/x4vr.log" 2>&1
+fi
+# The HUD distance mod (x4vr hud) is built from the game's files: rebuild it after a game update.
+# The game folder is the one of testandlaunch (or X4) in Steam's command.
+if [ -z "${X4VR_GAME_DIR-}" ]; then
+    for arg in "$@"; do
+        case "$arg" in */testandlaunch|*/X4) export X4VR_GAME_DIR="${arg%/*}"; break ;; esac
+    done
+fi
+"@CMAKE_INSTALL_FULL_BINDIR@/x4vr" hud --refresh >> "$dir/x4vr.log" 2>&1
+# X4's own arguments go after Steam's command; testandlaunch passes them on to X4. Without
+# -nocputhrottle X4 drops to ~12 fps whenever its window isn't focused (while wearing the headset).
+if [ "${X4VR_GAME_ARGS-unset}" = unset ]; then
+    set -- "$@" -skipintro -nocputhrottle
+else
+    # shellcheck disable=SC2086 # word splitting intended
+    set -- "$@" $X4VR_GAME_ARGS
+fi
+# Not exec: the exit status tells a clean quit (0) from a crash (134 abort, 139 segfault) or a kill
+# (143 SIGTERM, 137 SIGKILL).
+"$@" 2>> "$dir/stderr.log"
+status=$?
+echo "== $(date '+%F %T') X4 exited with status $status" >> "$dir/x4vr.log"
+exit "$status"

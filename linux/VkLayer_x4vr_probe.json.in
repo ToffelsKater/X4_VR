@@ -1,0 +1,14 @@
+{
+  "file_format_version": "1.2.0",
+  "layer": {
+    "name": "VK_LAYER_X4VR_probe",
+    "type": "GLOBAL",
+    "library_path": "@X4VR_LAYER_PATH@",
+    "api_version": "1.4.0",
+    "implementation_version": "1",
+    "description": "X4 VR Linux port, Phase 0: logs X4's Vulkan setup and presents; changes nothing",
+    "functions": {
+      "vkNegotiateLoaderLayerInterfaceVersion": "x4vrProbeNegotiateLoaderLayerInterfaceVersion"
+    }
+  }
+}

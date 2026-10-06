@@ -1,4 +1,16 @@
 cmake_minimum_required(VERSION 3.24)
+# The native Linux port is opt-in (docs/LINUX_PORT_PLAN.md). Without the option, this file is the
+# Windows build, unchanged.
+option(X4VR_LINUX "Build the native Linux port instead of the Windows mod" OFF)
+if(X4VR_LINUX)
+  project(x4vr_linux LANGUAGES C CXX)
+  include(CTest)
+  add_subdirectory(linux)
+  return()
+endif()
+if(NOT CMAKE_HOST_WIN32)
+  message(FATAL_ERROR "This integration targets Windows x64 X4. For the native Linux port, configure with -DX4VR_LINUX=ON.")
+endif()
 project(x4_openvr LANGUAGES C CXX ASM_MASM)
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "This integration targets Windows x64 X4.")

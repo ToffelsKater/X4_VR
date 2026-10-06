@@ -1,0 +1,10 @@
+/* libx4vr.so exports the Vulkan layer's entry points and nothing else: X4 exports thousands of
+   symbols, and nothing of ours (template code from the static C++ runtime included) may bind to
+   them or be bound by them. */
+{
+  global:
+    x4vrNegotiateLoaderLayerInterfaceVersion;
+    x4vr_GetInstanceProcAddr;
+    x4vr_GetDeviceProcAddr;
+  local: *;
+};

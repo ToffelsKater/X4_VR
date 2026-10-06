@@ -1,0 +1,14 @@
+{
+  "file_format_version": "1.2.0",
+  "layer": {
+    "name": "VK_LAYER_X4VR",
+    "type": "GLOBAL",
+    "library_path": "@X4VR_LAYER_PATH@",
+    "api_version": "1.4.0",
+    "implementation_version": "1",
+    "description": "X4 VR (Linux): stereo VR for X4: Foundations through SteamVR",
+    "functions": {
+      "vkNegotiateLoaderLayerInterfaceVersion": "x4vrNegotiateLoaderLayerInterfaceVersion"
+    }
+  }
+}

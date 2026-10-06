@@ -10,3 +10,5 @@ reports/camera-peek-*/
 /config/freetrack-path.backup
 /X4VRLauncher.exe
 /dist/
+/result
+/result-*
