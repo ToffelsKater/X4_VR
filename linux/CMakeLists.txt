@@ -49,10 +49,11 @@ target_compile_options(x4vr PRIVATE ${X4VR_WARNINGS})
 # the Vulkan loader (x4vr-run). Its own copy of the C++ runtime, nothing exported but the layer's
 # entry points, no unresolved symbols.
 add_library(x4vr_mod SHARED ${X4VR_ROOT}/src/linux/vr_layer.cpp ${X4VR_ROOT}/src/linux/runtime_bootstrap.cpp
-  ${X4VR_ROOT}/src/linux/pose_sender.cpp ${X4VR_ROOT}/src/linux/x11_cursor.cpp ${X4VR_ROOT}/src/eye_targets.cpp)
+  ${X4VR_ROOT}/src/linux/pose_sender.cpp ${X4VR_ROOT}/src/linux/x11_cursor.cpp
+  ${X4VR_ROOT}/src/linux/head_watch.cpp ${X4VR_ROOT}/src/eye_targets.cpp)
 set_target_properties(x4vr_mod PROPERTIES OUTPUT_NAME x4vr CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 target_include_directories(x4vr_mod PRIVATE ${X4VR_ROOT}/src/linux)
-target_link_libraries(x4vr_mod PRIVATE x4vr_vr Threads::Threads)
+target_link_libraries(x4vr_mod PRIVATE x4vr_vr x4vr_elf Threads::Threads)
 target_compile_options(x4vr_mod PRIVATE ${X4VR_WARNINGS})
 target_link_options(x4vr_mod PRIVATE -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -Wl,-z,defs
   -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/x4vr.map)
@@ -129,6 +130,13 @@ if(BUILD_TESTING) # include(CTest) is in the top-level CMakeLists.txt, so ctest 
   target_compile_options(elf_classes_tests PRIVATE ${X4VR_WARNINGS} -fno-pie)
   target_link_options(elf_classes_tests PRIVATE -no-pie)
   add_test(NAME elf_classes COMMAND elf_classes_tests)
+
+  add_executable(code_scan_tests ${X4VR_ROOT}/tests/linux/code_scan_tests.cpp)
+  target_link_libraries(code_scan_tests PRIVATE x4vr_elf)
+  set_target_properties(code_scan_tests PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+  target_compile_options(code_scan_tests PRIVATE ${X4VR_WARNINGS} -fno-pie -O2 -fcf-protection=none) # X4: no endbr64
+  target_link_options(code_scan_tests PRIVATE -no-pie)
+  add_test(NAME code_scan COMMAND code_scan_tests)
 
   add_executable(probe_socket_fixture ${X4VR_ROOT}/tests/linux/probe_socket_fixture.cpp)
   target_include_directories(probe_socket_fixture PRIVATE ${X4VR_ROOT}/src/linux)

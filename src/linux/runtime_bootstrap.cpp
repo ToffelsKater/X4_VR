@@ -4,6 +4,7 @@
 // yet (openxr_runtime_stub.hpp), and the Linux additions of linux_runtime.hpp at the end.
 #include <x4vr/runtime_bootstrap.hpp>
 #include "linux_runtime.hpp"
+#include "code_scan.hpp"
 #include "openxr_runtime_stub.hpp"
 #include "settings_control.hpp"
 #include "x11_cursor.hpp"
@@ -439,25 +440,20 @@ bool take_request(const char* name) {
 }
 namespace {
 // X4 double-buffers per-frame render data in two halves selected by a global that flips once
-// per frame (Windows 9.00: RVA 0x6b66280). Linux 9.00 candidate (plan stage C, unconfirmed): the
-// int at 0x72a0fa0, returned xor 1 by the function at 0x218e220 (`mov global,%eax; xor $1,%eax;
-// ret`), next to a two-element table at 0x454d9a0 indexed by it xor 1. eye_from_half=1 uses it.
+// per frame (Windows 9.00: RVA 0x6b66280; Linux 9.00: 0x72a0fa0, returned xor 1 by its reader at
+// 0x218e220, `mov global,%eax; xor $1,%eax; ret`). eye_from_half=1 uses it. Found by the X4 scan
+// (code_scan.hpp); until the scan is done, and without it, eyes follow the present count.
 const volatile int32_t* frame_half_global() {
-    static const volatile int32_t* global = []() -> const volatile int32_t* {
-        constexpr uintptr_t reader = 0x218e220, expected = 0x72a0fa0;
-        constexpr unsigned char head[] = {0x8b, 0x05}, tail[] = {0x83, 0xf0, 0x01, 0xc3};
-        if (!linux_port::in_executable(reader, 10)) return nullptr;
-        const auto* code = reinterpret_cast<const unsigned char*>(reader);
-        int32_t displacement;
-        std::memcpy(&displacement, code+2, 4);
-        if (std::memcmp(code, head, 2) || std::memcmp(code+6, tail, 4) || reader+6+uintptr_t(intptr_t(displacement)) != expected ||
-            !linux_port::in_executable(expected, 4)) {
-            linux_port::log("X4VR bootstrap: frame half global not found in this X4; eyes follow the present count");
-            return nullptr;
-        }
-        return reinterpret_cast<const volatile int32_t*>(expected);
-    }();
-    return global;
+    static std::atomic<const volatile int32_t*> global{};
+    static std::atomic<bool> resolved{false};
+    if (resolved.load(std::memory_order_acquire)) return global.load(std::memory_order_relaxed);
+    const auto* sites = linux_port::x4_sites();
+    if (!sites) return nullptr;
+    const auto address = uintptr_t(sites->frame_half_global);
+    if (address && linux_port::in_executable(address, 4)) global = reinterpret_cast<const volatile int32_t*>(address);
+    else linux_port::log("X4VR bootstrap: frame half global not found in this X4; eyes follow the present count");
+    resolved.store(true, std::memory_order_release);
+    return global.load(std::memory_order_relaxed);
 }
 }
 namespace linux_port {
@@ -468,6 +464,34 @@ void control(const char* action, const char* source) {
     if (value < 0) { log(std::string("X4VR control: ")+source+": can't update stereo.txt"); return; }
     log(std::string("X4VR control: ")+source+": "+(std::string_view(action) == "recenter" ? "recentred" :
         value == 2 ? "flat screen on" : "flat screen automatic"));
+}
+namespace {
+std::atomic<const code::X4Sites*> scanned_sites{nullptr};
+}
+const code::X4Sites* x4_sites() { return scanned_sites.load(std::memory_order_acquire); }
+void scan_x4() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        // The main program's loaded segments, as they are in memory (X4 is non-PIE: load address = vaddr).
+        std::vector<elf::Segment> segments;
+        dl_iterate_phdr([](dl_phdr_info* info, size_t, void* data) {
+            if (info->dlpi_name && *info->dlpi_name) return 0;
+            auto& out = *static_cast<std::vector<elf::Segment>*>(data);
+            for (int i = 0; i < info->dlpi_phnum; ++i) {
+                const auto& h = info->dlpi_phdr[i];
+                if (h.p_type != PT_LOAD || !h.p_filesz) continue;
+                const auto start = info->dlpi_addr+h.p_vaddr;
+                out.push_back({start, {reinterpret_cast<const unsigned char*>(start), size_t(h.p_filesz)}, (h.p_flags & PF_X) != 0, (h.p_flags & PF_W) != 0});
+            }
+            return 1;
+        }, &segments);
+        const auto started = std::chrono::steady_clock::now();
+        auto* sites = new code::X4Sites(code::find_x4_sites(elf::Image::from_segments(std::move(segments)))); // kept for the process
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count();
+        log("X4VR scan: X4 code found by pattern in "+std::to_string(ms)+" ms:");
+        for (const auto& note : sites->notes) log("X4VR scan:   "+note);
+        scanned_sites.store(sites, std::memory_order_release);
+    });
 }
 bool in_executable(uintptr_t address, size_t size) {
     struct Query { uintptr_t address; size_t size; bool found; } query{address, size, false};

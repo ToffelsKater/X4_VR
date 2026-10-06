@@ -14,6 +14,7 @@
 // right, +pitch looks up, +roll tilts left, +x moves left, +y up, -z forward. Positions are sent
 // in OpenTrack centimetres. Overrides without rebuilding: X4VR_OT_YAW, _PITCH, _ROLL, _X, _Y, _Z.
 #include "linux_runtime.hpp"
+#include "code_scan.hpp"
 #include "opentrack.hpp"
 #include <arpa/inet.h>
 #include <dlfcn.h>
@@ -31,6 +32,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace x4vr::linux_port {
 namespace {
@@ -68,13 +70,11 @@ x4vr::Matrix synthetic_pose(const float v[6]) {
 // change). The accessor hook (same frame, after the update) notes which packet X4 took, adds that
 // packet's eye offset for the frame being built, calls the original and restores the centre, and
 // records the packet's headset pose for the layer.
-constexpr uintptr_t opentrack_vtable = 0x3c62520, opentrack_type_info = 0x3c61bb0;
-constexpr size_t position_slot = 34;
-constexpr uintptr_t position_code_address = 0x1a0dda0;
-constexpr unsigned char position_code[] = {0xf3, 0x0f, 0x10, 0x87, 0xd0, 0x00, 0x00, 0x00}; // movss 0xd0(%rdi),%xmm0
+// The vtable, by RTTI, and its slot 34 code are found by the X4 scan (code_scan.hpp).
+constexpr size_t position_slot = code::x4::opentrack_position_slot;
 constexpr size_t field_position = 0xd0, field_scale = 0x114, field_roll = 0xa0, field_fresh = 0xa8;
 
-struct SentPacket { x4vr::Matrix head; std::array<std::array<float, 3>, 2> delta{}; bool flat{}, valid{}; };
+struct SentPacket { x4vr::Matrix head; std::array<std::array<float, 3>, 2> delta{}; bool flat{}, walking{}, valid{}; };
 std::mutex packets_mutex;
 std::array<SentPacket, 256> packets; // by sequence number (1..255)
 uint32_t taken_seq{}; // the packet X4's updates took last (game thread only)
@@ -91,19 +91,30 @@ double with_seq(double roll, uint32_t seq) {
     return roll;
 }
 
+// On foot X4 uses the pose one game frame sooner than in the cockpit, so the eye a frame half
+// means flips (Windows: half_xor_use 1 in the cockpit, half_xor_walk 0 on foot). Linux keeps
+// Windows' difference: on foot the eye is flipped by half_xor_use ^ half_xor_walk (1 by default;
+// half_xor_walk=1 turns the flip off).
+uint32_t walk_flip(bool walking) {
+    if (!walking) return 0;
+    const auto s = x4vr::stereo_settings();
+    return uint32_t((s.half_xor_use ^ s.half_xor_walk) & 1);
+}
+
 void position_at_use(void* tracker, float* x, float* y, float* z) {
+    note_tracker_use(tracker, uintptr_t(__builtin_return_address(0)));
     if (field<uint8_t>(tracker, field_fresh)) taken_seq = packet_seq(field<double>(tracker, field_roll));
     SentPacket packet;
     if (taken_seq) { std::lock_guard lock(packets_mutex); packet = packets[taken_seq]; }
     if (!packet.valid) return original_position(tracker, x, y, z);
-    const auto eye = x4vr::render_eye(); // the frame X4 builds now
+    const auto eye = x4vr::render_eye()^walk_flip(packet.walking); // the frame X4 builds now
     auto* position = reinterpret_cast<float*>(static_cast<char*>(tracker)+field_position);
     const float scale = field<float>(tracker, field_scale);
     const std::array<float, 3> centre{position[0], position[1], position[2]};
     for (int i = 0; i < 3; ++i) position[i] += packet.delta[eye][i]*scale;
     original_position(tracker, x, y, z);
     for (int i = 0; i < 3; ++i) position[i] = centre[i];
-    x4vr::record_render_pose(packet.head, eye, packet.flat, false);
+    x4vr::record_render_pose(packet.head, eye, packet.flat, packet.walking);
     x4vr::trace_event('U', x4vr::frame_tag(), float(eye), float(taken_seq), float(field<uint8_t>(tracker, field_fresh))); // use
 }
 
@@ -116,28 +127,78 @@ bool swap_slot(void** slot, void* replacement, void** original) {
     mprotect(start, size_t(page), PROT_READ);
     return true;
 }
-void install_eye_hook() {
+void install_eye_hook(const code::X4Sites& sites) {
     const char* off = std::getenv("X4VR_EYE_AT_USE");
     if (off && *off == '0') { log("X4VR pose: eye at use off (X4VR_EYE_AT_USE=0); eyes chosen when packets are sent"); return; }
-    auto** vtable = reinterpret_cast<void**>(opentrack_vtable);
-    const char expected_name[] = "N2VR9OpenTrackE";
-    bool ok = in_executable(opentrack_vtable-8, 8*(position_slot+2)) && in_executable(opentrack_type_info, 16) &&
-              reinterpret_cast<uintptr_t>(vtable[-1]) == opentrack_type_info;
-    if (ok) {
-        const auto name = *reinterpret_cast<const char* const*>(opentrack_type_info+8);
-        ok = in_executable(reinterpret_cast<uintptr_t>(name), sizeof expected_name) && !std::memcmp(name, expected_name, sizeof expected_name);
-    }
-    ok = ok && reinterpret_cast<uintptr_t>(vtable[position_slot]) == position_code_address &&
-         in_executable(position_code_address, sizeof position_code) &&
-         !std::memcmp(reinterpret_cast<const void*>(position_code_address), position_code, sizeof position_code);
-    if (!ok) { log("X4VR pose: eye-at-use hook doesn't match this X4 (only Linux 9.00 is known); eyes chosen when packets are sent"); return; }
+    auto** vtable = reinterpret_cast<void**>(sites.opentrack_vtable);
+    const bool ok = sites.opentrack_vtable && in_executable(sites.opentrack_vtable, 8*(position_slot+1)) &&
+                    reinterpret_cast<uintptr_t>(vtable[position_slot]) == sites.opentrack_position;
+    if (!ok) { log("X4VR pose: eye-at-use hook: VR::OpenTrack's position accessor not found in this X4; eyes chosen when packets are sent"); return; }
     void* original{};
     if (!swap_slot(&vtable[position_slot], reinterpret_cast<void*>(&position_at_use), &original)) {
         log("X4VR pose: eye-at-use hook not installed (vtable not writable)"); return;
     }
     original_position = reinterpret_cast<TrackerPosition>(original);
     eye_hook = true;
-    log("X4VR pose: eye-at-use hook installed (X4 9.00 VR::OpenTrack slot 34)");
+    log("X4VR pose: eye-at-use hook installed (VR::OpenTrack slot 34)");
+}
+
+// ---- Stage D and on foot: code patches ------------------------------------------------------
+// X4 9.00's per-frame camera input function (0xfeb..., docs/LINUX_FINDINGS.md, found with
+// X4VR_WATCH_HEAD) reads the tracker's angles (slot 33) and position (slot 34, called from
+// 0xfec248) and hands them to the camera controller (0x1933d00). The Windows mod's patches have
+// counterparts there; each is one byte, so it is atomic while X4 runs:
+// - Backward clamp: `if (tracker type != 7 && z > 0) z = 0` (0xfeb72b..0xfeb749) pinned leaning
+//   back and the rear eye. Its `jbe` past the zeroing (0xfeb73f) becomes `jmp`.
+// - On foot: with camera mode 0 and no ship (0xfec070, a call), X4 hands the camera a zero pose
+//   unless the tracker is an eye tracker. The `je` to the normal path after the call (0xfec077)
+//   becomes `jno`, always taken after `test`.
+// - On foot, camera offset (Windows' second on-foot patch): Camera::GetOffset (0x1929f70, Windows
+//   0x97a300) exits without a movement controller (camera +0x18, Windows +0x20; null on foot)
+//   before composing the head offset (camera +0x5a0..+0x5df, Windows +0x590). Its `je` to the
+//   exit (0x1929ffd -> 0x192a216) goes to the block that composes the offset without it
+//   (0x192a284 -> 0x192a15e, Windows 0x97a5a8) instead: displacement 0x213 -> 0x281.
+// Changes one byte at site+at from `from` to `to`; true once it is in place (patched now or
+// earlier). The site comes from the X4 scan (0: its pattern isn't in this X4).
+bool apply_patch(const char* what, uint64_t site, size_t at, unsigned char from, unsigned char to) {
+    const auto address = uintptr_t(site)+at;
+    if (!site || !in_executable(address, 1)) { log(std::string("X4VR patch: ")+what+": not found in this X4; left unchanged"); return false; }
+    auto* target = reinterpret_cast<unsigned char*>(address);
+    if (*target == to) { log(std::string("X4VR patch: ")+what+" already patched"); return true; }
+    if (*target != from) { log(std::string("X4VR patch: ")+what+": unexpected byte; left unchanged"); return false; }
+    const long page = sysconf(_SC_PAGESIZE);
+    auto* start = reinterpret_cast<void*>(address & ~uintptr_t(page-1));
+    if (mprotect(start, size_t(page), PROT_READ | PROT_WRITE | PROT_EXEC) != 0) { log(std::string("X4VR patch: ")+what+": code not writable"); return false; }
+    __atomic_store_n(target, to, __ATOMIC_SEQ_CST);
+    mprotect(start, size_t(page), PROT_READ | PROT_EXEC);
+    log(std::string("X4VR patch: ")+what+" patched");
+    return true;
+}
+// Both on-foot patches in place: walking counts as stereo (Windows: on_foot_tracking).
+std::atomic<bool> on_foot_tracking{false};
+// X4's player global (9.00: 0x3db6948), from the camera-offset site; 0 if not found.
+std::atomic<uintptr_t> player_global{0};
+// The rendered camera ([[player global]+0x3e8], the global both on-foot patch sites use) in mode 0
+// (+0x880) without a movement controller (+0x18): the player walking. Windows: [[manager]+0x3d0],
+// +0x868, +0x20 (camera_on_foot). X4's main thread only.
+bool camera_on_foot() {
+    const auto global = player_global.load();
+    const auto player = global ? *reinterpret_cast<const uintptr_t*>(global) : 0;
+    const auto camera = player ? *reinterpret_cast<const uintptr_t*>(player+0x3e8) : 0;
+    return camera && !*reinterpret_cast<const uintptr_t*>(camera+0x18) && !*reinterpret_cast<const int32_t*>(camera+0x880);
+}
+void apply_patches(const code::X4Sites& sites) {
+    const char* off = std::getenv("X4VR_PATCHES");
+    if (off && *off == '0') { log("X4VR patch: code patches off (X4VR_PATCHES=0)"); return; }
+    namespace x4 = code::x4;
+    apply_patch("backward head-position clamp", sites.backward_clamp, x4::backward_clamp_at, 0x76, 0xeb); // jbe -> jmp
+    const bool zeroing = apply_patch("on-foot head-pose zeroing", sites.onfoot_zeroing, x4::onfoot_zeroing_at, 0x84, 0x81); // je -> jno
+    const bool offset = apply_patch("on-foot camera offset", sites.camera_offset, x4::camera_offset_at, 0x13,
+                                    uint8_t(x4::camera_offset_jump)); // je displacement 0x213 -> 0x281
+    if (zeroing && offset && sites.player_global && in_executable(uintptr_t(sites.player_global), 8)) {
+        player_global = uintptr_t(sites.player_global);
+        on_foot_tracking = true;
+    }
 }
 
 void sender_loop() {
@@ -171,12 +232,17 @@ void sender_loop() {
         const auto settings = x4vr::stereo_settings();
         const auto game = game_state();
         auto head = x4vr::Matrix::identity();
-        const bool tracked = runtime->predicted_tracking(head, settings.predict) == x4vr::FrameStatus::ready;
+        // On foot X4 takes the head pose one game frame later than in the cockpit (Windows,
+        // STUTTER_RESEARCH.md "On foot"): predict one frame further.
+        // ponytail: one frame = 1/90 s, as on Windows; read the headset refresh if other rates matter.
+        const bool walking = game.walking && !settings.synth;
+        const bool tracked = runtime->predicted_tracking(head, settings.predict+(walking ? 1.f/90 : 0.f)) == x4vr::FrameStatus::ready;
         if (!tracked && !settings.synth) continue;
         if (!tracked) head = x4vr::Matrix::identity();
-        const auto eye = x4vr::render_eye(); // one game frame renders one eye
+        const auto eye = x4vr::render_eye()^walk_flip(walking); // one game frame renders one eye
         // A fullscreen menu goes to the theater screen, and so does any view without ship controls.
-        const bool flat = settings.theater == 2 || (settings.theater == 1 && game.sampled && (game.fullscreen_menu || !game.controlling_ship));
+        const bool flat = settings.theater == 2 ||
+                          (settings.theater == 1 && game.sampled && (game.fullscreen_menu || !(walking || game.controlling_ship)));
         const auto tracking_head = head; // reprojection pose (tracking space)
         if (recentered != settings.recenter) {
             recentered = settings.recenter;
@@ -227,7 +293,7 @@ void sender_loop() {
         if (at_use && settings.stereo && !flat && shared_pose() && eye == 1) continue;
         seq = seq % 255+1;
         if (at_use) {
-            SentPacket packet{tracking_head, {}, flat, true};
+            SentPacket packet{tracking_head, {}, flat, walking, true};
             const float sign[3] = {sx, sh, sz};
             for (uint32_t e = 0; e < 2; ++e)
                 for (int i = 0; i < 3; ++i) packet.delta[e][i] = settings.pos_scale*sign[i]*(eye_head[e].m[i][3]-head.m[i][3]);
@@ -242,7 +308,7 @@ void sender_loop() {
         // the theater screen, as on Windows where X4 then doesn't call FTGetData.
         if (at_use) recorded_any = true;
         else if (game.head_tracking) {
-            x4vr::record_render_pose(settings.synth && !flat ? recorded[eye] : tracking_head, eye, flat, false);
+            x4vr::record_render_pose(settings.synth && !flat ? recorded[eye] : tracking_head, eye, flat, walking);
             recorded_any = true;
         }
         const auto& m = head.m; // row-major, OpenVR seated: +X right, +Y up, -Z forward, metres
@@ -278,6 +344,7 @@ void sample_game_state() {
     if (next.head_tracking) {
         next.fullscreen_menu = menu && menu(true, nullptr); // X4 9.00: first argument true = any fullscreen menu
         next.controlling_ship = !controlling || controlling();
+        next.walking = on_foot_tracking && !next.controlling_ship && camera_on_foot();
         // X4 smooths tracker input with alpha = 1/strength; its menu minimum is 5, which lags
         // rotation and averages alternating eye offsets away. The exported setter accepts 1.
         static bool smoothing = false;
@@ -296,10 +363,11 @@ void sample_game_state() {
         log(next.head_tracking ? "X4VR pose: X4 applies head tracking (cockpit)" : "X4VR pose: X4 doesn't apply head tracking (menu, loading or on foot)");
     // What sends the cockpit to the theater screen (fullscreen_menu, !controlling_ship), logged
     // on each change with a millisecond clock: short pop-ups (hints) showed up as either.
-    if (next.head_tracking && (next.fullscreen_menu != state.fullscreen_menu || next.controlling_ship != state.controlling_ship)) {
+    if (next.head_tracking && (next.fullscreen_menu != state.fullscreen_menu || next.controlling_ship != state.controlling_ship ||
+                               next.walking != state.walking)) {
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         log("X4VR game: " + std::to_string(ms) + " ms: fullscreen_menu=" + std::to_string(next.fullscreen_menu) +
-            " controlling_ship=" + std::to_string(next.controlling_ship));
+            " controlling_ship=" + std::to_string(next.controlling_ship) + " walking=" + std::to_string(next.walking));
     }
     state = next;
 }
@@ -309,6 +377,15 @@ GameState game_state() {
 }
 void start_pose_sender() {
     static std::once_flag once;
-    std::call_once(once, [] { install_eye_hook(); std::thread(sender_loop).detach(); });
+    std::call_once(once, [] {
+        std::thread([] {
+            scan_x4(); // the X4 code the hook and patches use, found by pattern (a fraction of a second)
+            const auto* sites = x4_sites();
+            apply_patches(*sites);
+            install_eye_hook(*sites);
+            sender_loop();
+        }).detach();
+        start_head_watch();
+    });
 }
 }

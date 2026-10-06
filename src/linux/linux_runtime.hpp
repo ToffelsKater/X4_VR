@@ -23,6 +23,7 @@ struct GameState {
     bool fullscreen_menu = false;
     bool controlling_ship = true;
     bool head_tracking = false; // X4 applies tracker input
+    bool walking = false;       // on foot with head tracking (the on-foot patches applied)
 };
 void sample_game_state(); // X4's main thread only
 GameState game_state();
@@ -35,6 +36,15 @@ void start_pose_sender();
 // its code and data addresses are fixed). Checked before reading or patching X4 at known addresses.
 bool in_executable(uintptr_t address, size_t size);
 
+// Where the X4 code and data the mod uses are, found by byte pattern and RTTI (code_scan.hpp)
+// instead of fixed X4 9.00 addresses. scan_x4() scans the running game once (a fraction of a
+// second; the pose sender's thread calls it) and logs what it found; x4_sites() is null until then.
+}
+namespace x4vr::linux_port::code { struct X4Sites; }
+namespace x4vr::linux_port {
+void scan_x4();
+const code::X4Sites* x4_sites();
+
 // SteamVR's link to the Steam Frame applies the left eye's submitted pose to both eyes (measured
 // with pose_from_eye, docs/LINUX_FINDINGS.md). With shared_pose (stereo.txt, default 1) X4 builds
 // both eyes of a pair from one head pose (the pose sender skips the packet before a right-eye
@@ -44,4 +54,8 @@ bool shared_pose();
 // The live controls of `x4vr ctl` ("recenter", "flat"), from the mod: Ctrl+F12 / Ctrl+F11 while X4
 // has focus (x11_cursor.cpp) and SteamVR's recentre (runtime_bootstrap.cpp). Edits stereo.txt.
 void control(const char* action, const char* source);
+
+// Diagnostic (X4VR_WATCH_HEAD=1, head_watch.cpp): logs which X4 code reads the head position.
+void start_head_watch();
+void note_tracker_use(void* tracker, uintptr_t caller); // from the eye-at-use hook; cheap when off
 }

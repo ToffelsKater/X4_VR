@@ -471,8 +471,13 @@ farther) but the size factors don't (HUD smaller). Disabling protection didn't c
 bytecode (`x4vr game-grep` finds no source text in any of the 81 UI `.xpl` files). The Linux
 Windows launcher's mod only replaces the `.lua`. With protection off
 (`<uisafemode>false</uisafemode>`) X4 only logged failed signature checks for the two XML anchor
-files, and used them. **Left as is to stay with the Windows mod** (replacing the `.xpl` with
-patched source is untested); revisit together with Windows.
+files, and used them. First left as is to stay with the Windows mod; taken up again 2026-10-05:
+`x4vr hud` puts the patched Lua source at each `.xpl` path as well (Lua's loader takes source or
+bytecode). `x4vr hud --refresh` rebuilds an installed extension with it, since the source hash
+now covers the `.xpl` files. First headset check (2026-10-05): the radar and message HUD look
+bigger than without it, so X4 loads the replaced `.xpl` text. Confirmed at other factors: the HUD
+keeps its apparent size and moves back. Kept as a Linux-only addition (Windows replaces only the
+`.lua`).
 
 ## Stage D (backward clamp): search so far, paused
 
@@ -486,6 +491,59 @@ Searches for the Windows shape (sign flip with the constant at `0x2e245d0`, comp
 first candidates. The zeroing is downstream, wherever the camera reads the bridge's `+0x10`;
 finding it needs a different approach (e.g. watching the value at runtime). Paused 2026-10-04.
 
+**Runtime watch (2026-10-05, `X4VR_WATCH_HEAD=1`, `src/linux/head_watch.cpp`).** Hardware
+watchpoints, on every thread, over 10 windows of 20 s (cockpit and other states):
+- The bridge's `+0x10` stayed `0,0,0` and nothing touched it, also in the cockpit with the head
+  moving: X4 doesn't use the bridge for the cockpit view. The "only caller" above was wrong.
+- `VR::OpenTrack` (heap object) `+0xd0` position / `+0x100` angles: written by slot 2's update
+  (`0x1a1b8b2..0x1a1b8e2`), read by slot 34 (`0x1a0dda8..0x1a0ddd0`) and the function just before
+  it (`0x1a0dd68..0x1a0dd97`, the angles accessor). Nothing else in X4 reads them.
+- Slot 34 has **one caller, return address `0xfec24e`**, about once per frame while head tracking
+  applies; it stops when it doesn't (window 10). That function is where the cockpit view gets
+  the head position, so it is where the backward clamp and the on-foot gating should be.
+- With `theater=1` (default), a view without ship controls goes to the theater screen and the
+  sender sends the centred pose (position 0). So far, standing in the ship read as "X4 zeroes
+  the pose on foot", but the mod sent the zero itself. Windows has a walking check
+  (`freetrack_client.cpp`); Linux doesn't yet. Testing on foot needs `theater=0`.
+
+**The caller (`0xfeb...`, X4's per-frame camera input; disassembly 0xfeb000..0xfed400)** is the
+Linux counterpart of what the Windows notes call the bridge (Windows `0x9fd870`): keyboard look
+input into locals, then the tracker, then the camera controller `0x1933d00` with yaw/pitch/roll
+(`-0x100/-0xfc/-0xf8(%rbp)`) and position (`-0xf4/-0xf0/-0xb0`, z last):
+- `0xfeb6c5`: camera controller = `[[0x3db6948]+0x3e8]`; its mode `+0x880` == 0 goes to `0xfec070`:
+  `call 0x1e07060` (no ship); true and the tracker (manager `0x3db8938`, `+0x148`) not an eye
+  tracker (slot 8, `+0x40`) → the camera gets an all-zero pose (`0xfec0bc..0xfec0db`). That is
+  the on-foot zeroing. Patch: the `je 0xfeb6fc` at `0xfec077` → `jno` (byte `0xfec078` `0x84` →
+  `0x81`; `test` clears OF, so always taken).
+- `0xfeb6fc`/`0xfec1b0`: tracker slots 6 (`+0x30`) and 23 (`+0xb8`) gate the read; with mode 0,
+  slot 33 (angles) and slot 34 (position, the call at `0xfec248`) fill the locals.
+- `0xfeb71d`: `if (tracker slot 19 (+0x98) != 7 && z > 0) z = 0`: the backward clamp. Patch: the
+  `jbe` at `0xfeb73f` → `jmp` (`0x76` → `0xeb`).
+Both are applied by `apply_patches()` in `src/linux/pose_sender.cpp` (bytes checked first;
+`X4VR_PATCHES=0` turns them off). Windows' second on-foot patch (Camera::GetOffset without a
+movement controller) still needs its Linux counterpart, if on foot needs it.
+
+**On foot, after the zeroing patch (2026-10-05).** In the headset the view still doesn't follow
+the head on foot: the aim point stays centred. `X4VR_WATCH_HEAD=2` shows the same path as in the
+cockpit: camera mode 0, the gates pass (`0xfeb6fc`, `0xfec1b0`, `0xfec1f9`), angles and position
+read every frame. So the pose reaches the controller `0x1933d00` and is dropped later. The
+controller's head path `0x1935ac1` stores the position at controller `+0x5a0` and the rotation
+at `+0x5b0` (the counterpart of Windows' `Camera+0x590`). `X4VR_WATCH_HEAD=3` finds their
+readers. A search for Windows' `Camera::GetOffset` opening (movement-controller check, then the
+camera manager `0x3daab80`) found nothing.
+
+**Head offset readers (`X4VR_WATCH_HEAD=3`).** Written every frame by `0x1935b9b` (position) and
+`0x1e02200` (rotation), in the cockpit and on foot. Read:
+- In the cockpit by `0x1628ce0` (called from `0x1628dd0`, which runs only when
+  `[[0x3db6948]+0x238]` is set). It copies controller `+0x5a0..+0x5df` to the camera
+  `+0x280..+0x2b0`, then, if controller `+0x18` is set, hands it to that object's slot `0x138`.
+  Without it, it writes identity. This is the shape of Windows' `Camera::GetOffset`
+  (controller `+0x20`). It is not called on foot.
+- On foot by `0x11d9380` (4 calls per frame). With camera mode 0 and no ship (`0x1e07060`), and
+  its `+0x68` flag set, it takes the head offset (via `0x1dccd30`) and composes it into, or
+  replaces, the transform it is given. Which transform is unknown: `X4VR_WATCH_HEAD=4` records
+  the callers (return addresses) of `0x11d9380`, `0x1628ce0`, `0x1628dd0` and `0x1dccd30`.
+
 ## Mouse cursor
 
 X4's cursor is the X server's (Xwayland), not part of its swapchain, as on Windows. The Windows
@@ -496,3 +554,54 @@ over XCB (loaded at runtime, `src/linux/x11_cursor.cpp`): X4's window by `WM_CLA
 opaque pixels (alpha >= 128; a transfer can't blend) into each copied game image at the pointer's
 place, so it shows in the cockpit and on the virtual screen. Tested against Xvfb (window found by
 class, position and image read, hidden outside the window). `cursor=0` in stereo.txt turns it off.
+
+**On-foot camera offset found (2026-10-05, `X4VR_WATCH_HEAD=4` + disassembly).** The camera
+update `0x1646510` calls the cockpit reader `0x1628ce0` only when `0x1628210` returns true: in a
+ship (`[[0x3db6948]+0x238]+0x6aa8` != the invalid id at `0x3daa6f0`), or when controller
+`+0x780` is the player entity and the movement controller `+0x18` is set. Then it composes the
+offset into the camera (`+0x10..+0x40`) and sets `+0x2c0`; otherwise it takes a previously
+applied offset out again. The reader writes identity without a movement controller. Patches
+(`apply_patches`): `0x1646545` `0x85` → `0x81` (`jne` → `jno`) and `0x1628d4a` `0x3d` →
+`0x73` (to the reader's return `0x1628dbe`). These are Windows' two Camera::GetOffset conditions.
+
+**Gate patch result (2026-10-05).** With both camera-offset patches, on foot the view follows the
+head (same amount as the head), but the camera jumps to the cockpit seat and the player can't
+walk. Past the gate, `0x1646510` takes the seated path: `0x1628510(this, 0, 0)` re-parents the
+camera (its parent `+0x360`, transform `+0x10..+0x40` converted through the parent's
+`+0xe0..+0x110`), it sets `+0x2c0`, and `0x164662a` re-attaches it to an object found from
+`+0x360` (component types `0x54`/`0x75`, event `0x16c5fe0`). So `0x1646510` is the seat camera,
+not a plain "apply the offset". The gate is now opt-in (`X4VR_ONFOOT_GATE=1`); the on-foot view
+needs the offset applied in the walking camera's own update instead.
+
+**`X4VR_ONFOOT_GATE=2` result (2026-10-05).** Same as gate 1: the camera floats to the seat, no
+walking. So the predicate `0x1628210` is not where Windows' patch acts. Windows' commit 8342ef1
+patches inside `Camera::GetOffset` (0x97a300) at +0x113 (0x97a413): `cmp qword [rsi+0x20], 0`
+on a camera **parameter**, then the camera manager's `+0x230` entity against `camera+0x770`,
+then `[manager+0x3d0]`. The offset block is `0x97a5a8` and the exit `0x97a694`. On foot that
+function exits before it reads the head offset, so the read watch (mode 3) can't see its Linux
+counterpart. Next: a static search for code that reads `+0x5a0` (and `+0x5b0`) of a camera
+after checking a `+0x18`/`+0x20` member of the same object.
+
+**Camera::GetOffset found (2026-10-05).** `0x1929f70(camera, out, …)`:
+- checks camera `+0x780`/`+0x788`, then the mode (`+0x880`) and calls `0x18a0090`;
+- then `mov 0x18(%rbx),%r12; test; je 0x192a216` (no movement controller → return);
+- compares camera `+0x780` with `[0x3db6948]+0x238` (fallback `0x3db6c00`) and the camera with
+  `[0x3db6948]+0x3e8`. Equal → `0x192a2dd` (`0x1de5df0`, then `0x1628210`: seated returns).
+  Otherwise, through the movement controller's slot `0x138`.
+- composes the head offset (`+0x5a0..+0x5df`) into `out` at `0x192a15e`. The blocks
+  `0x192a284` and `0x192a2b6` reach it without a movement controller.
+
+This is Windows' 0x97a300 check for check. The patch is the same: the exit `je` (displacement
+byte `0x1929fff`, `0x13` → `0x81`) goes to `0x192a284`. The gate experiments
+(`X4VR_ONFOOT_GATE`) and the `0x1628d49` reader patch are removed.
+
+**Turn compensation (2026-10-05).** Not needed on Linux with `shared_pose=1`: no double vision
+when turning with the mouse on foot. The harshness reported was X4's turn speed, its own input
+setting. Windows' method (rotate the older eye's submitted pose by the camera turn) can't work on
+the Steam Frame, which reprojects both eyes with the left eye's pose. If ever needed, shift the
+other eye's image by the turn while copying it.
+
+**Pattern scan (2026-10-05).** `x4vr patterns` and the mod's startup scan find all six sites
+on X4 9.00 at the known addresses (clamp `0xfeb72b`, zeroing `0xfec070`, camera offset
+`0x1929ff6`, player global `0x3db6948`, frame half `0x72a0fa0`, VR::OpenTrack vtable `0x3c62520`
+with slot 34 `0x1a0dda0`). The in-game scan takes 51 ms. Patches and hook applied; play unchanged.

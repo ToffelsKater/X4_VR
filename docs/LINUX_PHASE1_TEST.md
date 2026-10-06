@@ -89,9 +89,10 @@ saved while the mod is on is flagged permanently**, even if later loaded without
 separate save for VR, or `x4vr hud remove` (X4 closed) before playing saves you want to keep
 online.
 
-X4 also asks about **Protected UI Mode**; the answer doesn't matter for this mod. **Known limit on
-Linux X4 9.00:** the HUD moves back but also looks smaller, because X4 loads precompiled copies of
-the HUD scripts and keeps its own size factors. A smaller factor (1.5) shrinks it less.
+X4 also asks about **Protected UI Mode**: turn it **off** (Extension Settings), else X4 doesn't
+load the extension's HUD scripts and the HUD moves back but looks smaller. Linux X4 9.00 loads
+precompiled `.xpl` copies of the HUD scripts, so the extension puts the patched script text at
+those paths too, so the HUD keeps its size at any factor.
 
 ## 4. Launch option
 

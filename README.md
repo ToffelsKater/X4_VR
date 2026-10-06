@@ -367,7 +367,8 @@ build is unchanged, and the Linux one is opt-in (`-DX4VR_LINUX=ON`). Tested with
 through SteamVR on an AMD GPU (RADV), Hyprland and NixOS. The full guide is
 [docs/LINUX_PHASE1_TEST.md](docs/LINUX_PHASE1_TEST.md); the design and open items are in
 [docs/LINUX_PORT_PLAN.md](docs/LINUX_PORT_PLAN.md), measurements in
-[docs/LINUX_FINDINGS.md](docs/LINUX_FINDINGS.md).
+[docs/LINUX_FINDINGS.md](docs/LINUX_FINDINGS.md). How each part works on Windows and Linux:
+[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md); feature status: [docs/FEATURES.md](docs/FEATURES.md).
 
 **What works:** stereo in the cockpit with head tracking and the eye chosen when X4 reads the
 pose (as on Windows), the virtual screen for menus, the mouse cursor, Ctrl+F12 / Ctrl+F11 and

@@ -1,6 +1,7 @@
 // x4vr: the Linux port's command-line tool. Subcommands so far are the Phase 0 measurements of
 // docs/LINUX_PORT_PLAN.md; settings, HUD and report commands join them later.
 #include "elf_classes.hpp"
+#include "code_scan.hpp"
 #include "../launcher/hud_mod.hpp"
 #include "../launcher/launcher_settings.hpp"
 #include "md5.hpp"
@@ -64,6 +65,11 @@ void usage() {
         "      game update (x4vr-run does that before every start). Game folder: $X4VR_GAME_DIR, else\n"
         "      Steam's default library. X4 then counts as modified (no online features; saves made\n"
         "      with it stay flagged).\n"
+        "\n"
+        "  patterns [path to the X4 executable]\n"
+        "      Finds the X4 code the mod patches and hooks by its bytes, as the mod does at startup,\n"
+        "      and prints where (default: X4 in the game folder). A site it doesn't find stays\n"
+        "      unpatched in the game; the mod logs the same list (\"X4VR scan\").\n"
         "\n"
         "  game-grep <text-regex> [path-regex]\n"
         "      Searches the game's catalog files (the base game's copy of each file) whose path matches\n"
@@ -403,11 +409,13 @@ std::filesystem::path game_dir() {
         if (std::filesystem::exists(candidate/"01.cat")) return candidate;
     return {};
 }
-// Same files as the Windows launcher. Known limit (docs/LINUX_FINDINGS.md): X4 9.00 loads the
-// scripts' precompiled .xpl copies, so the size factors don't apply and the HUD moves back but shrinks.
+// Linux X4 9.00 ships each UI script as .lua and as .xpl, precompiled bytecode, and loads the
+// .xpl: replacing only the .lua moved the HUD back but kept its size (2026-10-04). The extension
+// therefore also puts the patched Lua source at the .xpl path (Lua's loader takes source or bytecode).
+std::string xpl_of(const std::string& lua) { return lua.substr(0, lua.size()-4)+".xpl"; }
 std::map<std::string, std::string> hud_originals(const std::filesystem::path& game) {
     std::set<std::string> paths(x4vr::launcher::hud_anchor_files().begin(), x4vr::launcher::hud_anchor_files().end());
-    paths.insert(x4vr::launcher::hud_scripts().begin(), x4vr::launcher::hud_scripts().end());
+    for (const auto& script : x4vr::launcher::hud_scripts()) { paths.insert(script); paths.insert(xpl_of(script)); }
     return x4vr::launcher::read_game_files(game, paths);
 }
 std::string source_hash(const std::map<std::string, std::string>& originals) {
@@ -430,8 +438,10 @@ std::map<std::string, std::string> installed_hud(const std::filesystem::path& ex
 }
 bool install_hud(const std::filesystem::path& game, double scale, std::string& error) {
     const auto originals = hud_originals(game);
-    const auto files = x4vr::launcher::hud_files(originals, scale, error);
+    auto files = x4vr::launcher::hud_files(originals, scale, error);
     if (files.empty()) return false;
+    for (const auto& script : x4vr::launcher::hud_scripts())
+        if (originals.count(xpl_of(script))) files[xpl_of(script)] = files.at(script);
     const auto extension = game/"extensions/x4vr_hud";
     std::error_code ignored;
     std::filesystem::remove_all(extension, ignored);
@@ -488,7 +498,7 @@ int hud(const std::vector<std::string_view>& args) {
     if (!install_hud(game, scale, error)) { std::cerr << "Could not build the HUD mod: " << error << '\n'; return 1; }
     std::cout << "HUD distance mod installed: factor " << x4vr::launcher::format_number(scale) << " (" << extension.string() << ")\n";
     std::cout << "X4 will report a modified game: online features are off, and saves made with the mod stay flagged.\n";
-    std::cout << "Known limit on Linux X4 9.00: the HUD moves back but also looks smaller (X4 keeps its own size factors).\n";
+    std::cout << "X4's Protected UI Mode blocks the HUD's size factors: turn it off in X4 (Extension Settings), else the HUD only moves back and shrinks.\n";
     // X4's per-user content.xml (next to config.xml) remembers extensions turned off in its menu.
     if (const auto config = x4_config(); !config.empty()) {
         const auto content_path = config.parent_path()/"content.xml";
@@ -575,6 +585,19 @@ int elf_classes(const std::vector<std::string_view>& args) {
 }
 }
 
+// The X4 scan the mod runs at startup (code_scan.hpp), on the executable file.
+int patterns(const std::vector<std::string_view>& args) {
+    if (args.size() > 1) { usage(); return 2; }
+    const std::filesystem::path path = args.empty() ? game_dir()/"X4" : std::filesystem::path(args[0]);
+    if (path.empty() || !std::filesystem::exists(path)) { std::cerr << "X4 not found; give its path\n"; return 1; }
+    const auto sites = x4vr::linux_port::code::find_x4_sites(x4vr::elf::Image::load(path.string()));
+    std::cout << path.string() << ":\n";
+    for (const auto& note : sites.notes) std::cout << "  " << note << '\n';
+    const bool all = sites.backward_clamp && sites.onfoot_zeroing && sites.camera_offset && sites.frame_half_global && sites.opentrack_vtable;
+    std::cout << (all ? "All found: the mod supports this X4.\n" : "Some not found: those features stay off in this X4.\n");
+    return all ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) { usage(); return 2; }
     const std::string_view command = argv[1];
@@ -586,6 +609,7 @@ int main(int argc, char** argv) {
         if (command == "ctl") return ctl(args);
         if (command == "hud") return hud(args);
         if (command == "game-grep") return game_grep(args);
+        if (command == "patterns") return patterns(args);
         if (command == "check" && args.empty()) return check_settings(false, false);
         if (command == "fix-settings" && args.size() <= 1 && (args.empty() || args[0] == "--auto"))
             return check_settings(true, !args.empty());
