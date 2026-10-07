@@ -223,7 +223,10 @@ void track_camera(const Device& device, VkDescriptorSet set) {
     if (s.size >= 128) std::memcpy(m, s.bytes.data(), sizeof(m));
     const float* projection = m+16;
     const float tan_y = 1/std::fabs(projection[5]);
-    const bool main = s.size >= 128 && projection[15] == 0 && std::fabs(tan_y-x4vr::stereo_settings().game_tan_y) < 0.01f;
+    // Some passes bind the main projection with a camera-space view, forward (0,0,1) up to rounding (on
+    // foot, 2026-10-07): taken as the main camera, they turned the turn compensation by up to 170 degrees.
+    const bool camera_space = std::fabs(m[2]) < 1e-4f && std::fabs(m[6]) < 1e-4f && m[10] > 0.9999f;
+    const bool main = s.size >= 128 && projection[15] == 0 && std::fabs(tan_y-x4vr::stereo_settings().game_tan_y) < 0.01f && !camera_space;
     std::lock_guard lock(v.mutex);
     ++v.seen;
     if (s.size < 128) { ++v.unread; v.status = s.status; return; }
@@ -1342,7 +1345,20 @@ void compositor_loop(Device d) {
                 const auto turned = x4vr::turned_pose(poses[ref], eye_setup.head_from_eye[ref], views[ref],
                                                 poses[other], eye_setup.head_from_eye[other], views[other]);
                 correction = x4vr::rotation_degrees(turned, poses[other]);
-                poses[other] = turned;
+                // Between two eye images the camera turns a few degrees even in a fast flick. Larger ones
+                // come from a wrong camera match (2026-10-07: 67 of 68 were camera-space views, now filtered
+                // in track_camera; one was 90 degrees off) and showed that eye black for a frame.
+                // ponytail: dropped (that eye goes out uncompensated) and logged; find the camera if the log shows them often.
+                if (correction > 30) {
+                    log([&](auto& s) {
+                        s << std::setprecision(9) << "{\"event\":\"turn_dropped\",\"degrees\":" << correction << ",\"seq_gap\":" << (shown_seq[ref]-shown_seq[other])
+                          << ",\"fallbacks\":" << fallbacks << ",\"ref_forward\":[" << views[ref].m[2][0] << ',' << views[ref].m[2][1] << ',' << views[ref].m[2][2]
+                          << "],\"other_forward\":[" << views[other].m[2][0] << ',' << views[other].m[2][1] << ',' << views[other].m[2][2] << "]}";
+                    });
+                    compensate = false;
+                } else {
+                    poses[other] = turned;
+                }
             }
         }
         record.ready = std::chrono::steady_clock::now();
