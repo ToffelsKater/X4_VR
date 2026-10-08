@@ -146,7 +146,10 @@ Eye dump: create `reports/captures/dump.txt`, which writes `eye-0.raw`, `eye-1.r
   compensation. events.jsonl still had 287 `turn_dropped`, all real turns: 30.0 to 42.6 degrees
   between consecutive frames, forward vectors chaining from one event to the next. Those frames
   went out uncompensated. The limit was 30 degrees then and is 60 now, above those flicks and
-  below the 90-degree wrong match seen on 2026-10-07. Not yet run in X4 with 60.
+  below the 90-degree wrong match seen on 2026-10-07. Run with 60 (53 s of hard flicks on foot,
+  X4 at 90 fps): every submit compensated, mean correction 16 to 25 degrees per 2 s, largest
+  55.4; 2 `turn_dropped` (73.6 and 79.1 degrees), both real turns where one eye was on its
+  older image. User: no black flash, no black edge, nothing to complain about.
 - **UI scale cap located (issue #18, 2026-10-08):** the cap is in X4's code, not in config.xml
   or the Lua slider alone. 9.00: the stored scale is the float at RVA 0x2f4b6f0 (config key
   `uiscale`). `GetUIScaleFactor` (0xaff590) and `GetUIScale` (0xaff4e0) both return
