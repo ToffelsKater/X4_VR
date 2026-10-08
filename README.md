@@ -18,7 +18,8 @@ This is an unofficial fan project. It is not affiliated with or endorsed by Egos
 
 > [!TIP]
 > Quest players: stream with Virtual Desktop, not Steam Link. Over Steam Link the right eye
-> jitters when you turn your head, with both the OpenVR and the OpenXR option. See
+> jitters when you turn your head, with both the OpenVR and the OpenXR option. If you have to
+> use Steam Link, or you play on a Steam Frame, tick the launcher's Steam Link option. See
 > [Limitations](#limitations).
 
 > [!NOTE]
@@ -247,8 +248,8 @@ Your settings, saved profiles and HUD extension stay as they are.
 ## Fine-tuning (optional)
 
 `X4_VR\reports\captures\stereo.txt` is re-read every half second while you play. The launcher
-writes `stereo`, `pair`, `ipd_scale`, `predict` and `async_submit` for you. The other values
-are calibrated for X4 9.00; keys you leave out use their defaults.
+writes `stereo`, `pair`, `ipd_scale`, `predict`, `async_submit`, `external_vr` and `shared_pose`
+for you. The other values are calibrated for X4 9.00; keys you leave out use their defaults.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -265,6 +266,8 @@ are calibrated for X4 9.00; keys you leave out use their defaults.
 | `pair` | 0 | Experimental: render both eyes back to back for 90 Hz per eye. Needs the game at 180 fps. |
 | `theater` | 1 | Virtual screen: 1 = for fullscreen menus and cutscenes, 0 = never, 2 = always. |
 | `theater_distance`, `theater_width` | 2, 2.2 | Distance and width of the virtual screen in metres. |
+| `external_vr` | 0 | Experimental: 1 = the external camera (F2/F3) stays in VR instead of going to the virtual screen. |
+| `shared_pose` | 0 | 1 = both eyes of a pair are drawn from one head pose. Fixes the jittering right eye over Steam Link and on the Steam Frame. |
 | `cursor`, `cursor_distance` | 1, 5 | Mouse cursor on (1) or off (0), and how far it floats in the stereo view, in metres. |
 | `turn_comp` | 1 | Mouse-turn compensation: 1 = on foot, 0 = off, 2 = also in the cockpit (there it keeps the world aligned during ship turns but shifts the cockpit interior instead). |
 
@@ -307,7 +310,14 @@ Quest over Steam Link: the right eye jitters on head movement while the left eye
 Each eye is rendered at a different moment and sent with its own head pose, but Steam Link
 corrects both eyes with the left eye's pose. The OpenXR option doesn't help, because SteamVR's
 OpenXR runtime goes through Steam Link too. Use Virtual Desktop instead: it corrects each eye
-with its own pose, with both the OpenVR and the OpenXR option.
+with its own pose, with both the OpenVR and the OpenXR option. The Steam Frame streams the same
+way as Steam Link and shows the same jitter.
+
+If Virtual Desktop is not an option, tick *Steam Link / Steam Frame: fix the jittering right eye*
+in the launcher. Both eyes of a pair are then drawn from one head pose, so Steam Link's
+correction fits both. This option is new and was only tested on a Steam Frame under Linux so
+far. Please report how it works for you. Leave it off on other headsets: it adds a little delay
+to head movement.
 
 VR only works when X4 is started through the launcher or `play.ps1`. A normal Steam launch runs
 the game flat.
@@ -334,7 +344,7 @@ Logs are written to `X4_VR\reports\captures\debug-*\debug-events.log`; search fo
 | Headset shows only SteamVR's grey room | SteamVR must be running before the launch. The log should show `X4VR presenter: first stereo pair submitted`. |
 | Blurry | Display Mode Fullscreen at 3840×2160 (DSR enabled). |
 | Low frame rate or judder | Use a smaller DSR factor (e.g. 2560×1440) or lower graphics settings; 90 fps is needed. For short hitches, see [Smoother frames](#smoother-frames-optional). |
-| Quest: only the right eye jitters when turning the head | Stream with Virtual Desktop instead of Steam Link (see [Limitations](#limitations)). |
+| Quest or Steam Frame: only the right eye jitters when turning the head | Stream with Virtual Desktop instead of Steam Link, or tick the launcher's Steam Link option (see [Limitations](#limitations)). |
 | World too big or too small | Adjust World scale in the launcher (`ipd_scale` in `stereo.txt`). |
 | View off-center | Look straight ahead and press Ctrl+F12. |
 | HUD too close or too far | Change the factor in the launcher's HUD distance box (X4 closed) and press *Apply*. |

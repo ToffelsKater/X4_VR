@@ -1248,6 +1248,7 @@ void compositor_loop(Device d) {
     auto screen_origin = x4vr::Matrix::identity(), screen = screen_origin; // seated_from_screen
     std::vector<SubmitRecord> timeline(2048);
     uint64_t frames{};
+    uint64_t pairs_matched{}, pairs_differing{}, pairs_total{}; // shared pose statistics, logged every 4000 stereo submits
     while (!p.stopping) try {
         const auto s = x4vr::stereo_settings();
         if (!s.async_submit || !s.pace) { Sleep(5); continue; }
@@ -1292,19 +1293,24 @@ void compositor_loop(Device d) {
                 const auto width = float(p.eye_extent.width), height = float(p.eye_extent.height);
                 crop = {p.offset.x/width, p.offset.y/height, (p.offset.x+p.extent.width)/width, (p.offset.y+p.extent.height)/height};
                 format = p.format; eye_extent = p.eye_extent; eye_setup = p.eyes;
+                // Shared pose (StereoSettings::shared_pose): submit a pair built from one head pose. When
+                // the newest images differ, the eye that is ahead steps back to its image with the other's pose.
+                std::array<uint32_t, 2> pick{p.current[0], p.current[1]};
+                if (eyes == 2 && s.stereo && s.shared_pose) pairs_matched += x4vr::match_pair(pick, p.slot_pose, p.slot_seq, p.filled);
                 for (uint32_t e = 0; e < eyes; ++e) {
                     for (auto& h : p.held[e]) h = false;
-                    newest[e] = p.current[e];
+                    newest[e] = pick[e];
                     p.held[e][newest[e]] = true;
                     images[e] = p.image(e, newest[e]); fences[e] = p.written[e][newest[e]]; poses[e] = p.slot_pose[e][newest[e]];
                     views[e] = p.slot_view[e][newest[e]]; turn[e] = p.slot_turn[e][newest[e]];
                     newest_seq[e] = p.slot_seq[e][newest[e]];
                     // Fallback: the newest finished image other than the newest one. When the GPU runs
                     // behind, every newest image is still in flight at submit time; the one that was late
-                    // last tick is shown now instead of repeating the same image forever.
+                    // last tick is shown now instead of repeating the same image forever. Older than the
+                    // chosen one (with the shared pose that may not be the newest).
                     older[e] = UINT32_MAX;
                     for (uint32_t k = 0; k < Presenter::ring_size; ++k)
-                        if (k != newest[e] && p.filled[e][k] && (older[e] == UINT32_MAX || p.slot_seq[e][k] > p.slot_seq[e][older[e]]) &&
+                        if (k != newest[e] && p.filled[e][k] && p.slot_seq[e][k] < p.slot_seq[e][newest[e]] && (older[e] == UINT32_MAX || p.slot_seq[e][k] > p.slot_seq[e][older[e]]) &&
                             d.GetFenceStatus(d.device, p.written[e][k]) == VK_SUCCESS) older[e] = k;
                     if (older[e] != UINT32_MAX) {
                         p.held[e][older[e]] = true;
@@ -1398,6 +1404,13 @@ void compositor_loop(Device d) {
                 last = {dark, {{{0, 0, 1, 1}, {0, 0, 1, 1}}}, poses, false, true, {shown[0], UINT32_MAX}, generation};
             } else {
                 last = {textures, bounds, poses, s.submit_pose != 0, true, shown, generation};
+                if (s.stereo && s.shared_pose) {
+                    pairs_differing += std::memcmp(&poses[0], &poses[1], sizeof poses[0]) != 0;
+                    if (++pairs_total == 4000) {
+                        log([&](auto& out) { out << "{\"event\":\"shared_pose\",\"pairs\":4000,\"stepped_back\":" << pairs_matched << ",\"differing\":" << pairs_differing << '}'; });
+                        pairs_total = pairs_matched = pairs_differing = 0;
+                    }
+                }
             }
         }
         const auto submitted_at = std::chrono::steady_clock::now();

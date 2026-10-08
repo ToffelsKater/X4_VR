@@ -20,6 +20,9 @@ int main() {
     CHECK(get(live, "x4_width").empty()); // launcher-only keys stay out of stereo.txt
     CHECK(parse_settings(format_settings(live)) == live);
     CHECK(get(profile_of(live), "delay").empty() && get(profile_of(live), "pair") == "1");
+    // The launcher's opt-in checkboxes are profile keys and reach stereo.txt.
+    const auto options = compose_live(defaults, parse_settings("external_vr=1\nshared_pose=1\n"), "0");
+    CHECK(get(options, "external_vr") == "1" && get(profile_of(options), "shared_pose") == "1");
     // VR runtime: OpenVR unless the profile says openxr; kept in profiles (and stereo.txt, for reports).
     CHECK(!uses_openxr(profile) && uses_openxr(parse_settings("runtime=openxr\n")));
     CHECK(get(profile_of(compose_live(defaults, parse_settings("runtime=openxr\n"), "0")), "runtime") == "openxr");

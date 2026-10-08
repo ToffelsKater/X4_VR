@@ -238,6 +238,10 @@ bool at_ship_controls() {
     static const auto query = game_export<bool (*)()>("IsPlayerControllingShip");
     return !query || query();
 }
+bool external_view() { // the F2/F3 camera, not a cutscene
+    static const auto external = game_export<bool (*)()>("IsExternalViewActive"), cutscene = game_export<bool (*)()>("IsFullscreenCutsceneActive");
+    return external && external() && !(cutscene && cutscene());
+}
 }
 
 extern "C" __declspec(dllexport) BOOL __cdecl FTGetData(FreeTrackData* data) {
@@ -274,6 +278,11 @@ extern "C" __declspec(dllexport) BOOL __cdecl FTGetData(FreeTrackData* data) {
         if (!tracked) head = x4vr::Matrix::identity();
         const auto eye = x4vr::render_eye()^uint32_t(walking); // one game frame renders one eye
         x4vr::trace_event(eye ? 'R' : 'L', x4vr::frame_tag());
+        // Shared pose: a right-eye frame gets the head pose of the left-eye frame before it, so both
+        // images of a pair come from one pose. The eye offset is still added per eye below.
+        static auto pair_head = x4vr::Matrix::identity();
+        if (settings.shared_pose && settings.stereo && !settings.synth && eye == 1) head = pair_head;
+        else pair_head = head;
         static bool caller_logged = false;
         if (!caller_logged) { // diagnostics: where X4 reads the tracker (RVAs in X4.exe) and into what buffer
             caller_logged = true;
@@ -300,8 +309,9 @@ extern "C" __declspec(dllexport) BOOL __cdecl FTGetData(FreeTrackData* data) {
         }
         // A fullscreen menu (map, inventory, ...) goes to the theater screen, and so does any other
         // view without ship controls or head tracking (cutscenes, walking if the patches failed).
+        // external_vr keeps the external camera in stereo.
         const bool flat = forced_theater || settings.theater == 2 ||
-                          (settings.theater == 1 && (fullscreen_menu() || !(walking || at_ship_controls())));
+                          (settings.theater == 1 && (fullscreen_menu() || !(walking || at_ship_controls() || (settings.external_vr && external_view()))));
         const auto tracking_head = head; // reprojection pose (tracking space)
         // Recentre on Ctrl+F12 or when stereo.txt's counter changes.
         static bool recenter_keys = false;
@@ -389,8 +399,9 @@ extern "C" __declspec(dllexport) BOOL __cdecl FTGetData(FreeTrackData* data) {
                 // Game state trace, one line per change. Only exports that null-check their game
                 // objects (IsHUDActive crashes at the main menu).
                 char state[128];
-                std::snprintf(state, sizeof(state), "flat=%d menu=%d headtracking=%d ship=%d cutscene=%d walking=%d", flat, fullscreen_menu(),
-                              game_flag("IsHeadTrackingActive"), game_flag("IsPlayerControllingShip"), game_flag("IsFullscreenCutsceneActive"), walking);
+                std::snprintf(state, sizeof(state), "flat=%d menu=%d headtracking=%d ship=%d cutscene=%d walking=%d external=%d", flat, fullscreen_menu(),
+                              game_flag("IsHeadTrackingActive"), game_flag("IsPlayerControllingShip"), game_flag("IsFullscreenCutsceneActive"), walking,
+                              game_flag("IsExternalViewActive"));
                 static std::string last;
                 if (last != state) {
                     last = state;

@@ -128,6 +128,13 @@ struct StereoSettings { bool stereo = true; int delay = 2, recenter = 0; float i
     // Theater mode (flat game image on a virtual screen): 0 off, 1 while X4 shows a fullscreen
     // menu or sends no head poses, 2 always. Screen distance and width in metres.
     int theater = 1; float theater_distance = 2.f, theater_width = 2.2f;
+    // 1: with theater=1 the external camera (F2/F3) stays in stereo instead of going to the screen.
+    bool external_vr = false;
+    // One head pose per eye pair, for SteamVR's streaming link (Steam Link, Steam Frame), which
+    // reprojects both eyes with the left eye's pose (issue #4). X4 builds the right eye from the
+    // left eye's head pose, and the submission thread pairs images with equal poses. The eye that
+    // steps back is one frame older, and the head is sampled once per pair instead of per image.
+    bool shared_pose = false;
     // Mouse cursor overlay (1 on, 0 off); over the stereo view it sits cursor_distance metres ahead.
     int cursor = 1; float cursor_distance = 5.f;
     // Turn compensation: eye images are rendered one game frame apart, so a mouse or body turn

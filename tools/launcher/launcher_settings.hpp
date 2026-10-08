@@ -43,7 +43,7 @@ inline void set(Settings& settings, const std::string& key, const std::string& v
 // x4_width/x4_height are the launcher's own (the resolution the X4 check expects). runtime (openvr
 // or openxr) is read by the game at startup from X4VR_RUNTIME; stereo.txt keeps it for bug reports.
 inline const std::vector<std::string>& profile_keys() {
-    static const std::vector<std::string> keys{"stereo", "pair", "ipd_scale", "predict", "async_submit", "runtime", "x4_width", "x4_height"};
+    static const std::vector<std::string> keys{"stereo", "pair", "ipd_scale", "predict", "async_submit", "external_vr", "shared_pose", "runtime", "x4_width", "x4_height"};
     return keys;
 }
 inline Settings profile_of(const Settings& settings) {

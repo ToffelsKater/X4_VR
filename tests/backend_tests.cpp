@@ -140,10 +140,24 @@ void openxr_conversions() {
     require(x4vr::swapchain_format(50, varjo) == 50, "SRGB stays");
     require(x4vr::swapchain_format(44, {37}) == 0, "No channel-swapping copy");
 }
+void shared_pose_pairs() {
+    const auto a = x4vr::Matrix::identity();
+    auto b = a; b.m[0][3] = 1;
+    // Left eye: pose a (copy 1), then b (copy 3). Right eye: pose a (copy 2). Slot 2 is empty.
+    std::array<std::array<x4vr::Matrix, 3>, 2> pose{{{a, b, b}, {a, b, b}}};
+    const std::array<std::array<uint64_t, 3>, 2> seq{{{1, 3, 0}, {2, 0, 0}}};
+    const std::array<std::array<bool, 3>, 2> filled{{{true, true, false}, {true, false, false}}};
+    std::array<uint32_t, 2> pick{1, 0};
+    require(x4vr::match_pair(pick, pose, seq, filled) && pick[0] == 0 && pick[1] == 0, "The eye that is ahead steps back to the other eye's pose");
+    require(!x4vr::match_pair(pick, pose, seq, filled) && pick[0] == 0, "Equal poses stay");
+    pose[0][0].m[1][3] = 1; // no left image with the right eye's pose
+    pick = {1, 0};
+    require(!x4vr::match_pair(pick, pose, seq, filled) && pick[0] == 1 && pick[1] == 0, "No match: the newest images go out");
+}
 }
 int main() {
     try {
-        camera_math(); projections(); image_contract(); openxr_conversions();
+        camera_math(); projections(); image_contract(); openxr_conversions(); shared_pose_pairs();
         std::cout << checks << " checks passed (math/metadata/pre-init only; no GPU or HMD exercised).\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

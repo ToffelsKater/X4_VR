@@ -1,5 +1,8 @@
 #pragma once
 #include <openvr.h>
+#include <array>
+#include <cstdint>
+#include <cstring>
 
 namespace x4vr {
 // Row-major storage, column vectors; right handed, +Y up, forward -Z.
@@ -23,4 +26,16 @@ Matrix vulkan_projection(float left, float right, float top, float bottom,
 Matrix turned_pose(const Matrix& newest, const Matrix& newest_eye, const Matrix& newest_view,
                    const Matrix& own, const Matrix& own_eye, const Matrix& view);
 double rotation_degrees(const Matrix& a, const Matrix& b); // angle between the rotation parts
+// Shared pose (StereoSettings::shared_pose): the image slot per eye for a pair built from one head
+// pose. `pick` holds each eye's newest slot. When their poses differ, the eye that is ahead (higher
+// copy number) steps back to its filled slot with the other eye's pose; true if it did.
+template<size_t N> bool match_pair(std::array<uint32_t, 2>& pick, const std::array<std::array<Matrix, N>, 2>& pose,
+                                   const std::array<std::array<uint64_t, N>, 2>& seq, const std::array<std::array<bool, N>, 2>& filled) {
+    const auto same = [](const Matrix& a, const Matrix& b) { return !std::memcmp(&a, &b, sizeof a); };
+    if (!filled[0][pick[0]] || !filled[1][pick[1]] || same(pose[0][pick[0]], pose[1][pick[1]])) return false;
+    const uint32_t ahead = seq[0][pick[0]] > seq[1][pick[1]] ? 0 : 1, behind = 1-ahead;
+    for (uint32_t k = 0; k < N; ++k)
+        if (k != pick[ahead] && filled[ahead][k] && same(pose[ahead][k], pose[behind][pick[behind]])) { pick[ahead] = k; return true; }
+    return false;
+}
 }
