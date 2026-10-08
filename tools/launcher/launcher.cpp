@@ -83,6 +83,8 @@ bool running(const wchar_t* exe) {
     CloseHandle(snapshot);
     return found;
 }
+// The Vulkan loader ignores VK_ADD_LAYER_PATH in an elevated process: X4 then runs flat with head tracking only (#21).
+bool elevated() { static const bool yes = IsUserAnAdmin(); return yes; }
 std::wstring lower(std::wstring text) {
     std::transform(text.begin(), text.end(), text.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
     while (!text.empty() && (text.back() == L'\\' || text.back() == L'/')) text.pop_back();
@@ -442,6 +444,7 @@ std::wstring environment_block() {
     prepend(L"VK_ADD_LAYER_PATH", bin);
     prepend(L"VK_INSTANCE_LAYERS", L"VK_LAYER_X4VR_observe");
     variables[L"SteamAppId"] = variables[L"SteamGameId"] = L"392160"; // launch directly under Steam's app context
+    variables[L"DISABLE_VULKAN_OBS_CAPTURE"] = variables[L"DISABLE_RTSS_LAYER"] = L"1"; // their Vulkan layers load even with the programs closed and break ours (#21)
     variables[L"X4VR_CAPTURE_DIR"] = app.captures.wstring();
     variables[L"X4VR_OPENVR_BOOTSTRAP"] = L"1"; // the runtime bootstrap, whichever backend
     variables[L"X4VR_RUNTIME"] = uses_openxr(app.profile) ? L"openxr" : L"openvr";
@@ -459,6 +462,9 @@ void play() {
         return;
     }
     if (running(L"X4.exe")) return;
+    if (elevated() && MessageBoxW(app.window, L"The launcher runs as administrator. X4 then starts without the VR layer: head tracking works, but no image reaches the headset.\n\n"
+                                              L"Close the launcher and start it without administrator rights.\n\nLaunch anyway?",
+                                  L"X4 VR", MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2) != IDYES) return;
     if (!uses_openxr(app.profile) && !running(L"vrserver.exe") && MessageBoxW(app.window, L"SteamVR does not seem to be running. Start it (and your headset software) first.\n\nLaunch anyway?",
                                                  L"X4 VR", MB_ICONWARNING | MB_YESNO) != IDYES) return;
     refresh_hud_mod();
@@ -496,6 +502,7 @@ void refresh_status() {
     const bool tracker = freetrack_path_ok();
     status += std::string("Head tracking DLL path: ")+(tracker ? "ok" : "not set (press Fix head-tracking path)")+"\r\n";
     status += "Build: "+(missing.empty() ? std::string("ok") : "missing "+missing.front())+"\r\n";
+    if (elevated()) status += "Run as administrator: on (no image in the headset)\r\n"; // also lands in the bug report's system.txt
     status += std::string("X4: ")+(x4 ? "running (changes above apply live)" : "not running")+"\r\n";
     std::error_code error;
     const auto stats_path = app.captures/L"pair_stats.txt";

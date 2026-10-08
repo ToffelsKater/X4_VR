@@ -281,8 +281,12 @@ keep what helps on your system.
 | Your mouse software | Polling rate 250–500 Hz | Players report less camera stutter in X4 than at 1000 Hz. |
 | X4's options | A longer autosave interval | Only if you notice a hitch at every autosave. |
 
-Also close tools that hook the game's graphics: RTSS (MSI Afterburner's on-screen display), OBS
-game capture, Overwolf, and on some systems the Steam overlay.
+Also close tools that hook the game's graphics: Overwolf, and on some systems the Steam overlay.
+The launcher turns off the Vulkan layers of RTSS (MSI Afterburner's on-screen display) and OBS
+game capture for X4 on its own. To record the game in OBS, use window or display capture.
+
+Do not start the launcher as administrator. Windows then drops the VR layer, and X4 runs flat
+with head tracking only.
 
 ## Limitations
 
