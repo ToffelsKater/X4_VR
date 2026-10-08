@@ -81,12 +81,20 @@ int main() {
     CHECK(hud_files({}, 2.5, error).empty() && !error.empty()); // missing game files: nothing half-built
     // X4's user content.xml: only our entry is turned back on.
     bool was_disabled = false;
-    const auto content = enable_hud_extension("<content>\n  <extension id=\"ws_1\" enabled=\"false\"/>\n"
-                                              "  <extension id=\"x4vr_hud\" enabled=\"false\"/>\n</content>\n", was_disabled);
+    const auto content = enable_extension("<content>\n  <extension id=\"ws_1\" enabled=\"false\"/>\n"
+                                          "  <extension id=\"x4vr_hud\" enabled=\"false\"/>\n</content>\n", "x4vr_hud", was_disabled);
     CHECK(was_disabled);
     CHECK(content.find("id=\"x4vr_hud\" enabled=\"true\"/>") != std::string::npos);
     CHECK(content.find("id=\"ws_1\" enabled=\"false\"/>") != std::string::npos);
-    enable_hud_extension(content, was_disabled);
+    enable_extension(content, "x4vr_hud", was_disabled);
     CHECK(!was_disabled);
+
+    // Seat position mod: one diff per ship under its DLC, which loads first.
+    const auto seat = seat_files();
+    const auto& kukri = seat.at("extensions/ego_dlc_terran/assets/units/size_s/ship_ter_s_fighter_01.xml");
+    CHECK(kukri.find("<replace sel=\"//connection[@name='con_cockpit']/offset/position/@z\">2.253249</replace>") != std::string::npos);
+    CHECK(kukri.find("@name='con_uianchor']/offset/position/@z\">2.491607<") != std::string::npos);
+    CHECK(seat.at("content.xml").find("<dependency id=\"ego_dlc_terran\" optional=\"true\"/>") != std::string::npos);
+    CHECK(seat.at("x4vr_seat.txt") == "ships=Kukri\n");
     std::printf("launcher logic ok\n");
 }

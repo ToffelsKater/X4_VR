@@ -177,6 +177,13 @@ on it. When a game update changes those files, the launcher rebuilds the extensi
 you press *Play X4 in VR*. If the new files no longer look as expected, it removes the extension
 and tells you.
 
+In a few ships X4 places the pilot's camera too far forward, which looks wrong in VR. Tick
+*Camera further back in ships where it sits too far forward* in the launcher while X4 is closed.
+It writes a second small extension, `extensions\x4vr_seat`, that moves the camera and the HUD
+back in those ships. So far that is the Kukri, the Terran Cadet start ship. If the view in your
+ship looks wrong, name the ship in [issue 22](https://github.com/ToffelsKater/X4_VR/issues/22).
+Untick the box to remove the extension again.
+
 ### 5. First launch
 
 1. Start your headset software and SteamVR. Steam must be running too.
@@ -372,7 +379,8 @@ Close X4 and the launcher, then run this in the X4 installation folder:
 powershell -ExecutionPolicy Bypass -File X4_VR\scripts\uninstall.ps1
 ```
 
-This restores or removes the FreeTrack registry value and removes the HUD distance extension.
+This restores or removes the FreeTrack registry value and removes the HUD distance and seat
+position extensions.
 Then delete the `X4_VR` folder. If you like, set OpenTrack Support back to Off and restore your
 display settings.
 

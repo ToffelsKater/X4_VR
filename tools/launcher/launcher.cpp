@@ -29,7 +29,7 @@ using namespace x4vr::launcher;
 namespace {
 enum Id { ProfileBox = 100, SaveButton, DeleteButton, ModeAlternate, ModePair, ModeMono, ScaleBar, ScaleText,
           PredictBar, PredictText, AsyncBox, ExternalBox, SharedBox, RecenterButton, RuntimeBox, WidthEdit, HeightEdit, ChecksText, FixButton, StatusText, PlayButton, TrackerButton,
-          HudEdit, HudApply, HudRemove, HudText, ReportButton };
+          HudEdit, HudApply, HudRemove, HudText, SeatBox, ReportButton };
 constexpr const wchar_t* project_url = L"https://github.com/ToffelsKater/X4_VR";
 
 struct App {
@@ -267,7 +267,7 @@ std::string source_hash(const std::map<std::string, std::string>& originals) {
 }
 Settings installed_hud() { return parse_settings(read_file(hud_extension()/L"x4vr_hud.txt")); } // scale=, source=
 fs::path x4_content() { const auto config = x4_config(); return config.empty() ? config : config.parent_path()/L"content.xml"; }
-bool hud_disabled_in_x4() { bool disabled = false; enable_hud_extension(read_file(x4_content()), disabled); return disabled; }
+bool hud_disabled_in_x4() { bool disabled = false; enable_extension(read_file(x4_content()), "x4vr_hud", disabled); return disabled; }
 bool install_hud(double scale, std::string& error) {
     const auto originals = hud_originals();
     const auto files = hud_files(originals, scale, error);
@@ -316,9 +316,34 @@ void apply_hud(bool remove) {
     std::string error;
     if (!install_hud(scale, error)) { MessageBoxW(app.window, widen("Could not build the HUD mod: "+error).c_str(), L"X4 VR", MB_ICONERROR); return; }
     bool disabled = false;
-    const auto content = enable_hud_extension(read_file(x4_content()), disabled);
+    const auto content = enable_extension(read_file(x4_content()), "x4vr_hud", disabled);
     if (disabled && !write_file(x4_content(), content))
         MessageBoxW(app.window, L"X4 has the HUD distance mod turned off. Turn on \"X4 VR HUD distance\" in X4's Extensions menu.", L"X4 VR", MB_ICONWARNING);
+}
+
+// ---- Seat position mod: extensions\x4vr_seat, one XML diff per ship (hud_mod.hpp) ----
+fs::path seat_extension() { return app.x4_exe.parent_path()/L"extensions"/L"x4vr_seat"; }
+bool seat_installed() { return fs::exists(seat_extension()/L"x4vr_seat.txt"); }
+void apply_seat(bool install) {
+    if (running(L"X4.exe")) { MessageBoxW(app.window, L"Close X4 first: it loads extensions at startup.", L"X4 VR", MB_ICONWARNING); return; }
+    std::error_code error;
+    fs::remove_all(seat_extension(), error);
+    if (!install) return;
+    bool ok = true;
+    for (const auto& [path, text] : seat_files()) {
+        const auto target = seat_extension()/fs::path(path);
+        fs::create_directories(target.parent_path(), error);
+        ok = write_file(target, text) && ok;
+    }
+    if (!ok) { MessageBoxW(app.window, L"Could not write the seat position mod into X4's extensions folder.", L"X4 VR", MB_ICONERROR); return; }
+    bool disabled = false;
+    const auto content = enable_extension(read_file(x4_content()), "x4vr_seat", disabled);
+    if (disabled && !write_file(x4_content(), content))
+        MessageBoxW(app.window, L"X4 has the seat position mod turned off. Turn on \"X4 VR seat position\" in X4's Extensions menu.", L"X4 VR", MB_ICONWARNING);
+}
+// A newer launcher knows more ships: rewrite an installed mod that lists other ones.
+void refresh_seat_mod() {
+    if (seat_installed() && read_file(seat_extension()/L"x4vr_seat.txt") != seat_files().at("x4vr_seat.txt")) apply_seat(true);
 }
 
 // ---- bug report: logs zipped for the GitHub issue (a web link cannot attach files itself) ----
@@ -472,6 +497,7 @@ void play() {
     if (!uses_openxr(app.profile) && !running(L"vrserver.exe") && MessageBoxW(app.window, L"SteamVR does not seem to be running. Start it (and your headset software) first.\n\nLaunch anyway?",
                                                  L"X4 VR", MB_ICONWARNING | MB_YESNO) != IDYES) return;
     refresh_hud_mod();
+    refresh_seat_mod();
     apply_live();
     const auto stamp = std::to_wstring(GetTickCount64());
     const auto debug = app.captures/(L"debug-launcher-"+stamp);
@@ -543,6 +569,8 @@ void refresh_status() {
                                                                : widen("On: "+hud+"x farther away, same apparent size.").c_str());
     EnableWindow(app.controls[HudApply], !x4);
     EnableWindow(app.controls[HudRemove], !x4 && !hud.empty());
+    CheckDlgButton(app.window, SeatBox, seat_installed() ? BST_CHECKED : BST_UNCHECKED);
+    EnableWindow(app.controls[SeatBox], !x4);
 }
 
 // ---- window ----
@@ -591,12 +619,13 @@ void create_controls() {
     add(L"BUTTON", L"Apply", BS_PUSHBUTTON | WS_TABSTOP, 136, 546, 80, 26, HudApply);
     add(L"BUTTON", L"Remove", BS_PUSHBUTTON | WS_TABSTOP, 222, 546, 80, 26, HudRemove);
     add(L"STATIC", L"", 0, 28, 578, 470, 20, HudText);
-    add(L"BUTTON", L"Status", BS_GROUPBOX, 16, 610, 488, 142, 0);
-    add(L"STATIC", L"", 0, 28, 630, 470, 86, StatusText);
-    add(L"BUTTON", L"Fix head-tracking path", BS_PUSHBUTTON | WS_TABSTOP, 28, 718, 180, 26, TrackerButton);
-    add(L"BUTTON", L"Play X4 in VR", BS_DEFPUSHBUTTON | WS_TABSTOP, 16, 762, 376, 40, PlayButton);
-    add(L"BUTTON", L"Report a bug", BS_PUSHBUTTON | WS_TABSTOP, 400, 762, 104, 40, ReportButton);
-    add(L"STATIC", L"In game: Ctrl+F12 recenters, Ctrl+F11 switches to the flat theater screen and back.", 0, 16, 810, 488, 20, 0);
+    add(L"BUTTON", widen("Camera further back in ships where it sits too far forward ("+seat_ships()+")").c_str(), BS_AUTOCHECKBOX | WS_TABSTOP, 16, 608, 488, 22, SeatBox);
+    add(L"BUTTON", L"Status", BS_GROUPBOX, 16, 640, 488, 142, 0);
+    add(L"STATIC", L"", 0, 28, 660, 470, 86, StatusText);
+    add(L"BUTTON", L"Fix head-tracking path", BS_PUSHBUTTON | WS_TABSTOP, 28, 748, 180, 26, TrackerButton);
+    add(L"BUTTON", L"Play X4 in VR", BS_DEFPUSHBUTTON | WS_TABSTOP, 16, 792, 376, 40, PlayButton);
+    add(L"BUTTON", L"Report a bug", BS_PUSHBUTTON | WS_TABSTOP, 400, 792, 104, 40, ReportButton);
+    add(L"STATIC", L"In game: Ctrl+F12 recenters, Ctrl+F11 switches to the flat theater screen and back.", 0, 16, 840, 488, 20, 0);
     SendMessageW(app.controls[ScaleBar], TBM_SETRANGE, TRUE, MAKELPARAM(50, 200));
     SendMessageW(app.controls[PredictBar], TBM_SETRANGE, TRUE, MAKELPARAM(0, 60));
     SendMessageW(app.controls[RuntimeBox], CB_ADDSTRING, 0, LPARAM(L"OpenVR (SteamVR)"));
@@ -645,6 +674,8 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
             play(); refresh_status();
         } else if (id == HudApply || id == HudRemove) {
             apply_hud(id == HudRemove); refresh_status();
+        } else if (id == SeatBox && code == BN_CLICKED) {
+            apply_seat(IsDlgButtonChecked(window, SeatBox) == BST_CHECKED); refresh_status();
         } else if (id == ReportButton) {
             report_bug();
         }
@@ -684,7 +715,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     type.hCursor = LoadCursorW(nullptr, IDC_ARROW); type.hbrBackground = HBRUSH(COLOR_BTNFACE+1);
     type.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     RegisterClassW(&type);
-    RECT size{0, 0, MulDiv(520, app.dpi, 96), MulDiv(838, app.dpi, 96)};
+    RECT size{0, 0, MulDiv(520, app.dpi, 96), MulDiv(868, app.dpi, 96)};
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&size, style, FALSE);
     app.window = CreateWindowExW(0, type.lpszClassName, L"X4 Native VR", style, CW_USEDEFAULT, CW_USEDEFAULT,

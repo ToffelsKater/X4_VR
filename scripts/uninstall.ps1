@@ -14,10 +14,12 @@ if (Test-Path -LiteralPath $backup) {
     if ((Test-Path $parent) -and -not (Get-ChildItem $parent)) { Remove-Item -Path $parent }
     Write-Output 'Removed FreeTrack registry path.'
 }
-# The launcher's HUD distance extension (generated, marked by x4vr_hud.txt).
-$hud = Join-Path (Split-Path $projectRoot -Parent) 'extensions\x4vr_hud'
-if (Test-Path -LiteralPath (Join-Path $hud 'x4vr_hud.txt')) {
-    Remove-Item -LiteralPath $hud -Recurse -Force
-    Write-Output 'Removed the HUD distance extension.'
+# The launcher's X4 extensions (generated, each marked by its <name>.txt): HUD distance, seat position.
+foreach ($name in 'x4vr_hud', 'x4vr_seat') {
+    $extension = Join-Path (Split-Path $projectRoot -Parent) "extensions\$name"
+    if (Test-Path -LiteralPath (Join-Path $extension "$name.txt")) {
+        Remove-Item -LiteralPath $extension -Recurse -Force
+        Write-Output "Removed the $name extension."
+    }
 }
 Write-Output 'In X4 you may turn "OpenTrack Support" off again (Options > Controls > Head Tracking Support).'
