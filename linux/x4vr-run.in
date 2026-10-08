@@ -76,10 +76,18 @@ export VK_LOADER_DEBUG="${VK_LOADER_DEBUG:-error,warn}"
     if pgrep -x vrserver >/dev/null 2>&1 || pgrep -f 'bin/linux64/vrserver' >/dev/null 2>&1; then
         echo "SteamVR is running"
     else
-        echo "WARNING: SteamVR doesn't seem to be running; X4 will run without VR. Start SteamVR first."
+        echo "SteamVR isn't running yet: x4vr starts it"
     fi
     echo "command: $*"
 } >> "$dir/x4vr.log"
+# SteamVR's Vulkan needs (instance extensions, the headset's GPU, device extensions), asked now, in
+# x4vr's own process: asked by the mod inside X4's Vulkan setup, SteamVR can hang X4 for good
+# (src/linux/vr_query.hpp, issue #7). Without them the mod leaves X4 flat. Waits for the headset
+# (X4VR_HEADSET_WAIT seconds, default 120). Not with the mod's layer loaded: that's for X4 only.
+if vulkan=$(env -u VK_INSTANCE_LAYERS -u VK_LOADER_LAYERS_ENABLE "@CMAKE_INSTALL_FULL_BINDIR@/x4vr" vr-vulkan 2>> "$dir/x4vr.log"); then
+    { read -r X4VR_VR_INSTANCE_EXTENSIONS; read -r X4VR_VR_GPU; read -r X4VR_VR_DEVICE_EXTENSIONS; } <<< "$vulkan"
+    export X4VR_VR_INSTANCE_EXTENSIONS X4VR_VR_GPU X4VR_VR_DEVICE_EXTENSIONS
+fi
 # X4's settings for VR (FOV, anti-aliasing, upscaling, VSync, frame limit, OpenTrack, windowed
 # resolution) are kept apart from its 2D ones: x4vr saves config.xml as config.xml.x4vr-2d, puts
 # the VR copy in its place, and swaps back when X4 exits (below). Then fixed for VR while X4

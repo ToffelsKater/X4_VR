@@ -8,10 +8,29 @@
 let
   inherit (pkgs) lib;
   root = ../..;
+  # The commit built and its `git describe` (v0.5.0-3-gdc86c67), from .git: in the package's version,
+  # and in x4vr's menu, `x4vr version` and bug reports (linux/build_info.cmake). The source copied
+  # below leaves .git out, so the build can't ask git: the commit is read here, `git describe` runs
+  # on a copy of .git alone (a small step built first, rerun only when .git changes). Without the
+  # working files it can't tell uncommitted changes ("-dirty").
+  gitDir = root + "/.git";
+  hasGit = builtins.pathExists (gitDir + "/HEAD"); # a directory; not a worktree's .git file
+  commit = if hasGit then lib.commitIdFromGitRepo gitDir else "";
+  describe = if !hasGit then "" else lib.fileContents (pkgs.runCommand "x4vr-describe" {
+    nativeBuildInputs = [ pkgs.git ];
+    git = lib.cleanSourceWith {
+      src = root;
+      filter = path: type:
+        let rel = lib.removePrefix (toString root + "/") (toString path);
+        in rel == ".git" || lib.hasPrefix ".git/" rel;
+    };
+  } ''
+    git -c safe.directory='*' --git-dir="$git/.git" describe --always > $out
+  '');
 in
 pkgs.stdenv.mkDerivation {
   pname = "x4vr";
-  version = "0.4.0"; # the release this builds on (upstream tags)
+  version = if describe != "" then lib.removePrefix "v" describe else "unknown"; # 0.5.0-3-gdc86c67
 
   # The source nix-build copies into the store: the whole repository (Windows parts too; the
   # Linux CMake build only compiles its own and the shared files), minus .git, editor and build
@@ -29,7 +48,8 @@ pkgs.stdenv.mkDerivation {
   nativeBuildInputs = [ pkgs.cmake ];
   buildInputs = [ pkgs.vulkan-headers ];
   # OpenVR's client library is compiled into the mod from source (linux/CMakeLists.txt).
-  cmakeFlags = [ "-DX4VR_LINUX=ON" "-DOPENVR_SOURCE_DIR=${pkgs.openvr.src}" ];
+  cmakeFlags = [ "-DX4VR_LINUX=ON" "-DOPENVR_SOURCE_DIR=${pkgs.openvr.src}"
+                 "-DX4VR_GIT_COMMIT=${commit}" "-DX4VR_GIT_DESCRIBE=${describe}" ];
   doCheck = true; # the Linux tests
 
   meta = {

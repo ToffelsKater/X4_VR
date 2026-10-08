@@ -12,6 +12,8 @@
 //   (it applies on foot only, which needs the on-foot patches anyway);
 // - Ctrl+F12 for the theater screen: the recenter= counter (x4vr ctl recenter) until hotkeys exist.
 #include "linux_runtime.hpp"
+#include "vr_query.hpp"
+#include "build_info.h"
 #include "x11_cursor.hpp"
 #include <x4vr/eye_targets.hpp>
 #include <x4vr/runtime_bootstrap.hpp>
@@ -21,6 +23,8 @@
 #include <pthread.h>
 #include <sched.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -135,6 +139,7 @@ std::unique_lock<std::recursive_mutex> lock_vr_queue(const Device& d) {
 void pin_library() {
     static std::once_flag once;
     std::call_once(once, [] {
+        log("X4VR layer: build "+std::string(X4VR_BUILD)); // linux/build_info.cmake
         Dl_info info{};
         if (dladdr(reinterpret_cast<void*>(&pin_library), &info) && info.dli_fname &&
             dlopen(info.dli_fname, RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE))
@@ -165,13 +170,25 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo* ci, 
     const auto gpdpa = chain->u.pLayerInfo->pfnNextGetPhysicalDeviceProcAddr;
     const auto create = reinterpret_cast<PFN_vkCreateInstance>(gipa(nullptr, "vkCreateInstance"));
     if (!create) return VK_ERROR_INITIALIZATION_FAILED;
+    // Which thread creates which instance (issue #7): one created from inside a SteamVR call (by
+    // SteamVR) is passed on. One from another thread while that call runs never gets here: the
+    // Vulkan loader holds its lock through vkCreateInstance; the bug report's backtrace shows it.
+    if (x4vr::linux_port::is_x4_process())
+        log("X4VR layer: vkCreateInstance on thread "+std::to_string(syscall(SYS_gettid))+
+            (x4vr::is_runtime_bootstrap_thread() ? " from inside a SteamVR call: passed on" : ""));
     std::shared_ptr<x4vr::RuntimeBootstrap> runtime;
     std::optional<x4vr::VulkanExtensions> extensions;
     std::vector<const char*> names;
     auto augmented = *ci;
     try {
         if (x4vr::linux_port::is_x4_process() && !x4vr::is_runtime_bootstrap_thread()) {
+            // Without SteamVR's answers from x4vr-run there's no VR: say so at once, not after
+            // waiting for the headset (vr_query.hpp).
+            if (const char* answers = std::getenv(x4vr::vr_query::instance_extensions_variable); !answers || !*answers)
+                throw std::runtime_error("SteamVR's Vulkan needs not passed by x4vr-run (see the x4vr-run lines in x4vr.log)");
             pin_library();
+            // Not connected to SteamVR yet: that waits for X4's first frame, outside the loader's
+            // lock (runtime_bootstrap.cpp, connect).
             runtime = x4vr::acquire_runtime_bootstrap();
             extensions.emplace(ci->enabledExtensionCount, ci->ppEnabledExtensionNames, runtime->instance_extensions());
             names = extensions->names();
@@ -180,7 +197,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(const VkInstanceCreateInfo* ci, 
             x4vr::linux_port::start_opentrack_client();
         }
     } catch (const std::exception& error) {
-        // No headset or no SteamVR: X4 runs flat, as without the mod.
+        // No answers from x4vr-run (no SteamVR or headset): X4 runs flat, as without the mod.
         log(std::string("X4VR layer: VR runtime unavailable, X4 runs without VR: ")+error.what());
         runtime.reset();
         augmented = *ci;
@@ -208,11 +225,6 @@ VKAPI_ATTR void VKAPI_CALL vkDestroyInstance(VkInstance instance, const VkAlloca
     { std::lock_guard lock(state_mutex); instances.erase(key(instance)); }
     data->runtime.reset(); // the runtime itself stays pinned (acquire_runtime_bootstrap)
     destroy(instance, alloc);
-}
-// The loader's own vkGetPhysicalDeviceProperties2 (for OpenVR's loader-facing physical device).
-PFN_vkGetPhysicalDeviceProperties2 public_properties2() {
-    void* loader = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_NOLOAD);
-    return loader ? reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(dlsym(loader, "vkGetPhysicalDeviceProperties2")) : nullptr;
 }
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice physical, const VkDeviceCreateInfo* ci,
                                             const VkAllocationCallbacks* alloc, VkDevice* output) {
@@ -260,26 +272,24 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice physical, const V
     }
     try {
         if (runtime) {
-            // GetOutputDevice returns a loader-facing physical handle; this hook
-            // receives the next layer's handle. Compare GPU UUIDs, not wrappers.
-            const auto headset_physical = runtime->output_device(parent->instance);
-            const auto loader_properties = public_properties2();
+            // The headset's GPU, as SteamVR named it to x4vr-run before X4 started: asking SteamVR
+            // here, inside vkCreateDevice, can hang X4 on the loader's lock (vr_query.hpp, issue #7).
+            // Compared by device UUID.
+            const char* headset_text = std::getenv(x4vr::vr_query::gpu_variable);
+            const auto headset_uuid = x4vr::vr_query::parse_uuid(headset_text ? headset_text : "");
+            if (!headset_uuid) throw std::runtime_error("the headset's GPU not passed by x4vr-run (see x4vr.log)");
             const auto next_properties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(
                 parent->gipa(parent->instance, "vkGetPhysicalDeviceProperties2"));
-            if (!loader_properties || !next_properties) throw std::runtime_error("GPU identity query unavailable");
-            VkPhysicalDeviceIDProperties headset_id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+            if (!next_properties) throw std::runtime_error("GPU identity query unavailable");
             VkPhysicalDeviceIDProperties game_id{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
-            VkPhysicalDeviceProperties2 headset_properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
             VkPhysicalDeviceProperties2 game_properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-            headset_properties.pNext = &headset_id; game_properties.pNext = &game_id;
-            loader_properties(headset_physical, &headset_properties);
+            game_properties.pNext = &game_id;
             next_properties(physical, &game_properties);
-            const uint8_t empty_uuid[VK_UUID_SIZE]{};
-            if (!std::memcmp(game_id.deviceUUID, empty_uuid, VK_UUID_SIZE) ||
-                std::memcmp(game_id.deviceUUID, headset_id.deviceUUID, VK_UUID_SIZE))
+            if (std::memcmp(game_id.deviceUUID, headset_uuid->data(), VK_UUID_SIZE))
                 throw std::runtime_error("X4 selected a GPU different from the headset's GPU ("+
-                                         std::string(game_properties.properties.deviceName)+" vs "+headset_properties.properties.deviceName+")");
-            extensions.emplace(ci->enabledExtensionCount, ci->ppEnabledExtensionNames, runtime->device_extensions(headset_physical));
+                                         std::string(game_properties.properties.deviceName)+" is "+
+                                         x4vr::vr_query::uuid_text(game_id.deviceUUID)+", the headset's is "+headset_text+")");
+            extensions.emplace(ci->enabledExtensionCount, ci->ppEnabledExtensionNames, runtime->device_extensions(physical));
             names = extensions->names();
             augmented.enabledExtensionCount = static_cast<uint32_t>(names.size());
             augmented.ppEnabledExtensionNames = names.data();

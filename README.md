@@ -363,14 +363,16 @@ display settings.
 
 ## Linux (native X4, experimental)
 
-> **Experimental.** Tested on one setup so far (Steam Frame, AMD GPU, X4 9.00). Expect rough
-> edges, and please report what you find.
+> **Experimental.** Tested on two setups so far (Steam Frame with an AMD GPU, and with an NVIDIA
+> RTX 4090; X4 9.00). Expect rough edges.
 
 A port for the native Linux version of X4 9.00, through SteamVR. It covers stereo in the cockpit
 and on foot, head tracking, the virtual screen for menus, the mouse cursor and the HUD distance.
-OpenXR isn't supported on Linux yet. It was tested with a Steam Frame on an AMD GPU. NVIDIA and
-Intel GPUs should work but are untested: please send a bug report either way. The Windows build
-is unchanged. How it works and what differs from Windows: [docs/linux](docs/linux/ARCHITECTURE.md).
+OpenXR isn't supported on Linux yet. It was tested with a Steam Frame on an AMD GPU and on an
+NVIDIA RTX 4090; Intel GPUs should work but are untested. Got it running? Please post in
+[Working on Linux](https://github.com/ToffelsKater/X4_VR/issues/8) with the file from *Make a bug
+report* attached: it lists your GPU, driver, headset and system, so that issue tracks which setups
+work. A problem gets its own new issue. The Windows build is unchanged.
 
 ### What you need
 
@@ -415,8 +417,9 @@ explains each item at the bottom of the screen.
    options. Steam's Play button still starts the normal game; only the menu starts VR.
 2. On a tiling window manager (Hyprland, Sway, i3), add the rule from *Tiling window manager
    rules*.
-3. Choose *Launch X4 in VR*. It starts SteamVR if needed.
-4. Look straight ahead and press Ctrl+F12 to recenter. Ctrl+F11 switches to the flat screen.
+3. Check the setting checklist
+4. Choose *Launch X4 in VR*. It starts SteamVR if needed.
+5. Look straight ahead and press Ctrl+F12 to recenter. Ctrl+F11 switches to the flat screen.
 
 On a laptop with two GPUs, X4 must run on the same GPU as SteamVR (the dedicated one), else it
 runs flat. Put `__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia` (NVIDIA) or
@@ -425,7 +428,11 @@ which GPU the last VR session used.
 
 The mod keeps your 2D X4 settings apart from the VR ones and puts them back when X4 closes. If
 something goes wrong, the log is `~/.local/state/x4vr/x4vr.log`, and *Make a bug report* packs it
-up for a GitHub issue.
+up for a GitHub issue, with SteamVR's logs and your setup (GPU and driver, headset, system, Steam
+and SteamVR versions). If X4
+hangs at its start (running in Steam, but no window), make the report while it hangs: it then also
+records where X4 waits (with a full backtrace when `gdb` or `eu-stack` is installed). The menu's first line (and `x4vr version`)
+shows the version.
 
 ### Uninstall
 

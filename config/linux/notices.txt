@@ -10,5 +10,5 @@ tip: Modified warning: changing the HUD has X4 flagged as modified.
 tip: Protected UI Mode: needs to be disabled in the pop-up message (or Settings > Extensions) for HUD scaling to work.
 tip: Tiling window managers (Hyprland, Sway, i3): the VR window must float, else X4 renders at the tile's size. See Setup > Tiling window manager rules.
 tip: Laptop with two GPUs: X4 must run on the same GPU as SteamVR (the dedicated one), else it runs flat. Put __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia (NVIDIA) or DRI_PRIME=1 (AMD or Intel Arc) in front of the launch option. The GPU status line shows which GPU the last VR session used.
-help: Only tested on AMD GPUs so far. On NVIDIA or Intel, a bug report helps even if everything works.
+help: Got X4 VR running on Linux? Please post in Working on Linux (https://github.com/ToffelsKater/X4_VR/issues/8) with the file from "Make a bug report" attached.
 help: No profile for your headset yet? Once your settings work well, use "Save as profile" and share the file (~/.local/state/x4vr/profiles/) in a GitHub issue, so it can be built in for others.

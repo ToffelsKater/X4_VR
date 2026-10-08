@@ -56,6 +56,17 @@ target_compile_options(x4vr PRIVATE ${X4VR_WARNINGS})
 # For uninstalling: the library folder under the install prefix (lib or lib64) and the source
 # folder this was built from (shown, never deleted).
 target_compile_definitions(x4vr PRIVATE X4VR_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}" X4VR_SOURCE_DIR="${X4VR_ROOT}")
+# The version (git describe) and commit built (build_info.h), re-read at every build: for the menu,
+# `x4vr version`, bug reports and the log. Without git (Nix), they come from these.
+set(X4VR_GIT_COMMIT "" CACHE STRING "The commit built, when the source has no git (Nix)")
+set(X4VR_GIT_DESCRIBE "" CACHE STRING "Its git describe, when the source has no git (Nix)")
+add_custom_target(x4vr_build_info
+  COMMAND ${CMAKE_COMMAND} -DROOT=${X4VR_ROOT} -DOUT=${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.h
+          -DGIT_COMMIT=${X4VR_GIT_COMMIT} -DGIT_DESCRIBE=${X4VR_GIT_DESCRIBE}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/build_info.cmake
+  BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.h)
+add_dependencies(x4vr x4vr_build_info)
+target_include_directories(x4vr PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 # The mod: Vulkan layer, VR runtime and OpenTrack client in one library, loaded into X4 by
 # the Vulkan loader (x4vr-run). Its own copy of the C++ runtime, nothing exported but the layer's
@@ -64,7 +75,8 @@ add_library(x4vr_mod SHARED ${X4VR_ROOT}/src/linux/observe_layer.cpp ${X4VR_ROOT
   ${X4VR_ROOT}/src/linux/opentrack_client.cpp ${X4VR_ROOT}/src/linux/x11_cursor.cpp
   ${X4VR_ROOT}/src/eye_targets.cpp)
 set_target_properties(x4vr_mod PROPERTIES OUTPUT_NAME x4vr CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
-target_include_directories(x4vr_mod PRIVATE ${X4VR_ROOT}/src/linux)
+target_include_directories(x4vr_mod PRIVATE ${X4VR_ROOT}/src/linux ${CMAKE_CURRENT_BINARY_DIR}/generated)
+add_dependencies(x4vr_mod x4vr_build_info)
 target_link_libraries(x4vr_mod PRIVATE x4vr_vr x4vr_elf Threads::Threads)
 target_compile_options(x4vr_mod PRIVATE ${X4VR_WARNINGS})
 target_link_options(x4vr_mod PRIVATE -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL -Wl,-z,defs
@@ -133,17 +145,46 @@ if(BUILD_TESTING) # include(CTest) is in the top-level CMakeLists.txt, so ctest 
   target_compile_options(steam_config_tests PRIVATE ${X4VR_WARNINGS})
   add_test(NAME steam_config COMMAND steam_config_tests)
 
+  add_executable(report_info_tests ${X4VR_ROOT}/tests/linux/report_info_tests.cpp)
+  target_include_directories(report_info_tests PRIVATE ${X4VR_ROOT}/tools/linux)
+  target_compile_options(report_info_tests PRIVATE ${X4VR_WARNINGS})
+  add_test(NAME report_info COMMAND report_info_tests)
+
+  add_executable(vr_query_tests ${X4VR_ROOT}/tests/linux/vr_query_tests.cpp)
+  target_include_directories(vr_query_tests PRIVATE ${X4VR_ROOT}/src/linux)
+  target_compile_options(vr_query_tests PRIVATE ${X4VR_WARNINGS})
+  add_test(NAME vr_query COMMAND vr_query_tests)
+
+  # Issue #7: X4 hung when SteamVR answered the mod's Vulkan questions inside X4's Vulkan setup.
+  # loader_lock_tests stands in for X4 and the Vulkan loader (its lock included), fake_vrclient for
+  # SteamVR; no Vulkan loader or driver needed.
+  add_library(fake_vrclient MODULE ${X4VR_ROOT}/tests/linux/fake_vrclient.cpp)
+  target_include_directories(fake_vrclient PRIVATE ${OPENVR_SOURCE_DIR}/headers ${OPENVR_SOURCE_DIR}/src)
+  target_link_libraries(fake_vrclient PRIVATE ${CMAKE_DL_LIBS})
+  set_target_properties(fake_vrclient PROPERTIES PREFIX "" OUTPUT_NAME vrclient
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/fake_steamvr/bin/linux64)
+  add_executable(loader_lock_tests ${X4VR_ROOT}/tests/linux/loader_lock_tests.cpp)
+  target_include_directories(loader_lock_tests PRIVATE ${X4VR_ROOT}/src/linux ${VULKAN_HEADERS_DIR})
+  target_compile_definitions(loader_lock_tests PRIVATE VK_NO_PROTOTYPES)
+  target_compile_options(loader_lock_tests PRIVATE ${X4VR_WARNINGS})
+  target_link_libraries(loader_lock_tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  set_target_properties(loader_lock_tests PROPERTIES ENABLE_EXPORTS ON) # x4vr_test_* for fake_vrclient
+  add_dependencies(loader_lock_tests x4vr_mod fake_vrclient)
+  add_test(NAME loader_lock COMMAND loader_lock_tests $<TARGET_FILE:x4vr_mod> ${CMAKE_CURRENT_BINARY_DIR}/fake_steamvr)
+  set_tests_properties(loader_lock PROPERTIES TIMEOUT 60)
+
   add_executable(state_files_tests ${X4VR_ROOT}/tests/linux/state_files_tests.cpp)
   target_include_directories(state_files_tests PRIVATE ${X4VR_ROOT}/tools/linux)
   target_compile_options(state_files_tests PRIVATE ${X4VR_WARNINGS})
   add_test(NAME state_files COMMAND state_files_tests)
 
-  foreach(suite IN ITEMS launch_option_tests settings_swap_tests)
+  foreach(suite IN ITEMS launch_option_tests settings_swap_tests x4_settings_tests)
     add_executable(${suite} ${X4VR_ROOT}/tests/linux/${suite}.cpp)
     target_include_directories(${suite} PRIVATE ${X4VR_ROOT}/tools/linux)
     target_compile_options(${suite} PRIVATE ${X4VR_WARNINGS})
   endforeach()
   add_test(NAME launch_option COMMAND launch_option_tests)
   add_test(NAME settings_swap COMMAND settings_swap_tests)
+  add_test(NAME x4_settings COMMAND x4_settings_tests)
 
 endif()
