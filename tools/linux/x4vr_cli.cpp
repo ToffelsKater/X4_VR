@@ -296,7 +296,7 @@ void enable_hud_in_vr() {
     if (config.empty() || !std::filesystem::exists(settings_marker())) return;
     const auto content_path = config.parent_path()/"content.xml";
     bool disabled = false;
-    const auto content = x4vr::launcher::enable_hud_extension(read_text(content_path), disabled);
+    const auto content = x4vr::launcher::enable_extension(read_text(content_path), "x4vr_hud", disabled);
     if (disabled && !write_text(content_path, content))
         std::cout << "X4 has it turned off: turn on \"X4 VR HUD distance\" in X4's Extensions menu.\n";
 }
@@ -515,7 +515,7 @@ Checks current_checks() {
     }
     if (const auto config = x4_config(); !config.empty()) {
         bool disabled = false;
-        x4vr::launcher::enable_hud_extension(read_text(config.parent_path()/"content.xml"), disabled);
+        x4vr::launcher::enable_extension(read_text(config.parent_path()/"content.xml"), "x4vr_hud", disabled);
         c.hud_off_in_x4 = c.hud > 0 && disabled && c.in_vr; // off outside VR on purpose
         // config.xml holds the 2D settings except during a VR session; the VR ones are the copy.
         const auto vr = std::filesystem::path(config.string()+".x4vr-vr");
