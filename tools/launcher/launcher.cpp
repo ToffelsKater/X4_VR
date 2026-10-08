@@ -574,7 +574,7 @@ void create_controls() {
     add(L"STATIC", L"next start", 0, 432, 232, 72, 20, 0);
     add(L"BUTTON", L"Stutter protection (async submission)", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 264, 300, 22, AsyncBox);
     add(L"BUTTON", L"Recenter view (Ctrl+F12)", BS_PUSHBUTTON | WS_TABSTOP, 330, 262, 174, 26, RecenterButton);
-    add(L"BUTTON", L"External views (F2/F3) stay in VR (experimental)", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 290, 488, 22, ExternalBox);
+    add(L"BUTTON", L"External views (F2/F3): screen fills the view", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 290, 488, 22, ExternalBox);
     add(L"BUTTON", L"Steam Link / Steam Frame: fix the jittering right eye", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 314, 488, 22, SharedBox);
     add(L"BUTTON", L"X4 settings", BS_GROUPBOX, 16, 348, 488, 170, 0);
     add(L"STATIC", L"Resolution", 0, 28, 372, 80, 20, 0);

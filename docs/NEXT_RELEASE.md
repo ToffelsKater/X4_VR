@@ -23,12 +23,15 @@ in the Status box. Thanks to Joenyan (#21).
 Over Steam Link and on the Steam Frame the right eye jittered on head turns, because SteamVR's
 streaming corrects both eyes with the left eye's head pose. The launcher has a new option,
 *Steam Link / Steam Frame: fix the jittering right eye*. With it both eyes of a pair are drawn
-from one head pose. It is off by default, and other headsets should leave it off. The method
-comes from Cully-Curwen's Linux port, where it removed the jitter on a Steam Frame. On Windows
-it is untested with these headsets so far, so please report how it works (#4).
+from one head pose, also when X4 drops below 90 fps. It is off by default, and other headsets
+should leave it off. The method comes from Cully-Curwen's Linux port, where it removed the
+jitter on a Steam Frame. On Windows it is untested with these headsets so far, so please report
+how it works (#4).
 
-### External views can stay in VR
+### External views can fill the view
 
-The external camera (F2/F3) went to the flat theater screen since theater mode was added. The
-new launcher option *External views (F2/F3) stay in VR* keeps them in the headset. Fullscreen
-menus and cutscenes still use the theater screen. Experimental and off by default (#17).
+The external camera (F2/F3) shows on the flat theater screen. With the new launcher option
+*External views (F2/F3): screen fills the view* that screen becomes as large as X4's field of
+view and stands 20 m away, like a window into space that stays in place when you look around.
+The picture has no depth, because X4 does not move the external camera with your head.
+Fullscreen menus and cutscenes keep the normal screen. Off by default (#17).

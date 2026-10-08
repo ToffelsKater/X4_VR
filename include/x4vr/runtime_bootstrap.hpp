@@ -128,8 +128,11 @@ struct StereoSettings { bool stereo = true; int delay = 2, recenter = 0; float i
     // Theater mode (flat game image on a virtual screen): 0 off, 1 while X4 shows a fullscreen
     // menu or sends no head poses, 2 always. Screen distance and width in metres.
     int theater = 1; float theater_distance = 2.f, theater_width = 2.2f;
-    // 1: with theater=1 the external camera (F2/F3) stays in stereo instead of going to the screen.
-    bool external_vr = false;
+    // 1: for the external camera (F2/F3) the theater screen fills the game's field of view,
+    // external_distance metres away. X4 ignores the head there (measured 2026-10-08: no rotation, no
+    // eye offset), so its picture is flat. Submitted as eye images it lagged behind the head, and from
+    // a fixed pose each eye ran out of picture on its own side when looking left or right.
+    bool external_vr = false; float external_distance = 20.f;
     // One head pose per eye pair, for SteamVR's streaming link (Steam Link, Steam Frame), which
     // reprojects both eyes with the left eye's pose (issue #4). X4 builds the right eye from the
     // left eye's head pose, and the submission thread pairs images with equal poses. The eye that
@@ -158,6 +161,9 @@ uint64_t frame_tag();   // present count when the game samples its pose
 void record_render_pose(const Matrix& head, uint32_t eye, bool flat = false, bool walking = false);
 // Recentred seated origin (position + yaw), published by the pose source; false until set.
 void publish_view_origin(const Matrix& origin);
+// The pose source sees X4's external camera (F2/F3) and external_vr is on: the layer sizes the screen for it.
+void publish_external_view(bool shown);
+bool external_view_shown();
 bool view_origin(Matrix& origin);
 int frame_half(); // X4 per-frame double-buffer half (0/1), -1 if unavailable
 // Layer: once per present. Returns the present number; pose lookup by number.

@@ -1325,24 +1325,40 @@ void compositor_loop(Device d) {
             }
         }
         if (resubmit && !last.valid) continue;
+        // external_vr: the external camera's picture fills the game's field of view, like a window.
+        auto screen_settings = s;
+        if (theater && s.external_vr && x4vr::external_view_shown() && crop.vMax > crop.vMin) {
+            const float aspect = (crop.uMax-crop.uMin)*float(eye_extent.width)/((crop.vMax-crop.vMin)*float(eye_extent.height));
+            screen_settings.theater_distance = s.external_distance;
+            screen_settings.theater_width = 2*s.external_distance*s.game_tan_y*aspect;
+        }
         record.locked = std::chrono::steady_clock::now();
         uint32_t fallbacks = 0;
         std::array<bool, 2> fresh{};
         bool compensate{};
         double correction = 0;
         if (!resubmit) {
+            std::array<bool, 2> use_newest{};
             for (uint32_t e = 0; e < eyes; ++e) {
                 // Unbounded only without a fallback, i.e. before anything was shown since start or a resize.
                 const auto left = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline-std::chrono::steady_clock::now()).count();
                 const bool done = d.WaitForFences(d.device, 1, &fences[e], VK_TRUE, fallback[e] ? uint64_t(std::max<int64_t>(left, 0)) : UINT64_MAX) == VK_SUCCESS;
-                const bool use_newest = done || !fallback[e];
-                fallbacks += !use_newest;
-                const auto seq = use_newest ? newest_seq[e] : older_seq[e];
+                use_newest[e] = done || !fallback[e];
+                fallbacks += !use_newest[e];
+            }
+            // Shared pose: one eye on its older image breaks the pair (2026-10-08, X4 below 90 fps: 38% of
+            // the pairs). The other eye steps back too if its older image has that pose.
+            if (eyes == 2 && s.stereo && s.shared_pose && use_newest[0] != use_newest[1]) {
+                const uint32_t other = use_newest[0] ? 0 : 1;
+                if (fallback[other] && !std::memcmp(&fallback_poses[other], &fallback_poses[1-other], sizeof(x4vr::Matrix))) use_newest[other] = false;
+            }
+            for (uint32_t e = 0; e < eyes; ++e) {
+                const auto seq = use_newest[e] ? newest_seq[e] : older_seq[e];
                 fresh[e] = seq != shown_seq[e];
                 shown_seq[e] = seq;
-                shown[e] = use_newest ? newest[e] : older[e];
-                textures[e].m_nImage = reinterpret_cast<uint64_t>(use_newest ? images[e] : fallback[e]);
-                if (!use_newest) { poses[e] = fallback_poses[e]; views[e] = fallback_views[e]; turn[e] = fallback_turn[e]; }
+                shown[e] = use_newest[e] ? newest[e] : older[e];
+                textures[e].m_nImage = reinterpret_cast<uint64_t>(use_newest[e] ? images[e] : fallback[e]);
+                if (!use_newest[e]) { poses[e] = fallback_poses[e]; views[e] = fallback_views[e]; turn[e] = fallback_turn[e]; }
             }
             // Turn compensation: the older eye image is shown at the newest image's camera heading.
             compensate = !theater && turn[0] && turn[1] && shown_seq[0] != shown_seq[1];
@@ -1351,11 +1367,12 @@ void compositor_loop(Device d) {
                 const auto turned = x4vr::turned_pose(poses[ref], eye_setup.head_from_eye[ref], views[ref],
                                                 poses[other], eye_setup.head_from_eye[other], views[other]);
                 correction = x4vr::rotation_degrees(turned, poses[other]);
-                // Between two eye images the camera turns a few degrees even in a fast flick. Larger ones
-                // come from a wrong camera match (2026-10-07: 67 of 68 were camera-space views, now filtered
-                // in track_camera; one was 90 degrees off) and showed that eye black for a frame.
+                // A wrong camera match turns that eye far off and showed it black for a frame (2026-10-07:
+                // 67 of 68 were camera-space views, now filtered in track_camera; one was 90 degrees off).
+                // Real mouse flicks on foot reached 42.6 degrees between two images (2026-10-08, 287 in
+                // 47 s above 30), so the limit sits above them.
                 // ponytail: dropped (that eye goes out uncompensated) and logged; find the camera if the log shows them often.
-                if (correction > 30) {
+                if (correction > 60) {
                     log([&](auto& s) {
                         s << std::setprecision(9) << "{\"event\":\"turn_dropped\",\"degrees\":" << correction << ",\"seq_gap\":" << (shown_seq[ref]-shown_seq[other])
                           << ",\"fallbacks\":" << fallbacks << ",\"ref_forward\":[" << views[ref].m[2][0] << ',' << views[ref].m[2][1] << ',' << views[ref].m[2][2]
@@ -1389,12 +1406,12 @@ void compositor_loop(Device d) {
                         screen_origin = d.runtime->predicted_tracking(head, 0) == x4vr::FrameStatus::ready ? x4vr::seated_origin(head) : x4vr::Matrix::identity();
                 }
                 auto ahead = x4vr::Matrix::identity();
-                ahead.m[2][3] = -s.theater_distance;
+                ahead.m[2][3] = -screen_settings.theater_distance;
                 screen = x4vr::multiply(screen_origin, ahead);
-                error = d.runtime->show_theater(fresh[0] || !screen_visible ? &textures[0] : nullptr, crop, screen, s.theater_width);
+                error = d.runtime->show_theater(fresh[0] || !screen_visible ? &textures[0] : nullptr, crop, screen, screen_settings.theater_width);
                 screen_visible = true;
             }
-            if (xr) update_cursor(d, cursor, s, theater && screen_visible ? &screen : nullptr); // OpenXR sends all layers with the frame
+            if (xr) update_cursor(d, cursor, screen_settings, theater && screen_visible ? &screen : nullptr); // OpenXR sends all layers with the frame
             if (theater) {
                 auto dark = textures;
                 for (uint32_t e = 0; e < 2; ++e) {
@@ -1431,7 +1448,7 @@ void compositor_loop(Device d) {
                 }
                 hold_unread();
             }
-            if (!xr) update_cursor(d, cursor, s, theater && screen_visible ? &screen : nullptr); // OpenVR overlays don't wait for Submit
+            if (!xr) update_cursor(d, cursor, screen_settings, theater && screen_visible ? &screen : nullptr); // OpenVR overlays don't wait for Submit
             turn_stats(compensate, correction);
         }
         pair_stats(s, fresh, blocked, interval, !error.empty(), fallbacks, waited, submitting, resubmit);

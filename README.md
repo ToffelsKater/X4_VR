@@ -266,7 +266,8 @@ for you. The other values are calibrated for X4 9.00; keys you leave out use the
 | `pair` | 0 | Experimental: render both eyes back to back for 90 Hz per eye. Needs the game at 180 fps. |
 | `theater` | 1 | Virtual screen: 1 = for fullscreen menus and cutscenes, 0 = never, 2 = always. |
 | `theater_distance`, `theater_width` | 2, 2.2 | Distance and width of the virtual screen in metres. |
-| `external_vr` | 0 | Experimental: 1 = the external camera (F2/F3) stays in VR instead of going to the virtual screen. |
+| `external_vr` | 0 | 1 = for the external camera (F2/F3) the virtual screen fills your view like a window, instead of the smaller screen. The picture has no depth, because X4 does not move this camera with the head. |
+| `external_distance` | 20 | How far away that large screen stands, in metres. |
 | `shared_pose` | 0 | 1 = both eyes of a pair are drawn from one head pose. Fixes the jittering right eye over Steam Link and on the Steam Frame. |
 | `cursor`, `cursor_distance` | 1, 5 | Mouse cursor on (1) or off (0), and how far it floats in the stereo view, in metres. |
 | `turn_comp` | 1 | Mouse-turn compensation: 1 = on foot, 0 = off, 2 = also in the cockpit (there it keeps the world aligned during ship turns but shifts the cockpit interior instead). |

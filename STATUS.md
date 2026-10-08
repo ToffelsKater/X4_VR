@@ -141,6 +141,12 @@ Eye dump: create `reports/captures/dump.txt`, which writes `eye-0.raw`, `eye-1.r
   overlay per cursor image (`RuntimeBootstrap::show_cursor`), uploaded once, then only shown
   or hidden; each upload is logged ("cursor image N uploaded"). Verified: 5 minutes of menus,
   5 uploads in the whole session, 0 failures, cursor visible throughout.
+- **Black flicker on foot (issue #10), checked 2026-10-08 with 9a4393a:** the user saw no
+  black flash in 47 s of fast mouse turns on foot. No camera-space view reached the turn
+  compensation. events.jsonl still had 287 `turn_dropped`, all real turns: 30.0 to 42.6 degrees
+  between consecutive frames, forward vectors chaining from one event to the next. Those frames
+  went out uncompensated. The limit was 30 degrees then and is 60 now, above those flicks and
+  below the 90-degree wrong match seen on 2026-10-07. Not yet run in X4 with 60.
 - **UI scale cap located (issue #18, 2026-10-08):** the cap is in X4's code, not in config.xml
   or the Lua slider alone. 9.00: the stored scale is the float at RVA 0x2f4b6f0 (config key
   `uiscale`). `GetUIScaleFactor` (0xaff590) and `GetUIScale` (0xaff4e0) both return
@@ -157,13 +163,20 @@ Eye dump: create `reports/captures/dump.txt`, which writes `eye-0.raw`, `eye-1.r
   higher, but 1.8 is the slider maximum. The cap is X4's, not ours (no UI scale setting in
   the layer). Look at raising the limit, for example a UI mod that lifts the slider maximum,
   or our own scale on the HUD/menus.
-- **Added, untested in the headset — opt-in stereo for external views (F2/F3), issue #17
-  (2026-10-08):** `external_vr=1` (launcher checkbox) leaves the external camera in stereo:
-  FTGetData asks X4's export `IsExternalViewActive` (camera mode field != 0, null-checked) and
-  excludes `IsFullscreenCutsceneActive`. state.txt now logs `external=`. X4's head-tracker
-  bridge does not zero the pose in external views, so head tracking should move the camera.
-  To check in the headset: stereo and eye side in F2 and F3 (the eye-at-use timing there is
-  not measured; the cockpit values are used), and that cutscenes still go to the theater.
+- **Added, headset-checked on the Aero — external views (F2/F3) on a view-filling screen,
+  issue #17 (2026-10-08):** `external_vr=1` (launcher checkbox). Measured first: while piloting,
+  X4 still reports ship controls in F2/F3 (`ship=1`, state.txt now logs `external=`), and the
+  theater comes on as "no head pose": the external camera never reads the tracker position, so
+  eye at use records nothing. head_sync in F2: camera/head rotation ratio 0.000, eye offset 0,
+  so X4 ignores the head there and stereo is not available without patching X4's external
+  camera. Two ways to send the picture as eye images failed in the headset: with the head pose
+  it lagged behind the head (X4 at ~70 fps), and from one fixed pose each eye ran out of picture
+  on its own side when looking left or right (each eye image only covers its own frustum).
+  Shipped: the theater path, with the screen sized to X4's field of view
+  (width = 2 * `external_distance` * `game_tan_y` * aspect, default 20 m away). FTGetData
+  publishes `IsExternalViewActive` without cutscene or fullscreen menu
+  (`publish_external_view`), and the submission thread sizes the screen and the cursor from it.
+  User: fills the view, same area in both eyes, cursor right, map and cockpit unchanged.
   Original request (player, 2026-10-04, Quest 3, OpenXR): early builds stayed in VR in the F2/F3 external camera ("floating in space", good
   for watching fights). Since theater mode (6a9611f) any view without ship controls goes to the
   theater screen: `theater=1` tests `!(walking || at_ship_controls())` in
@@ -175,15 +188,20 @@ Eye dump: create `reports/captures/dump.txt`, which writes `eye-0.raw`, `eye-1.r
   Same player: OpenVR on Quest 3 showed "scuba masking" (early builds: left eye lagging on
   head turns); OpenXR works well. Likely the Steam Link issue, see the README note to use
   Virtual Desktop.
-- **Added, untested on Steam Link — right-eye jitter fix, `shared_pose` (issue #4, 2026-10-08):**
+- **Added, untested on Steam Link, measured on the Aero — right-eye jitter fix, `shared_pose` (issue #4, 2026-10-08):**
   ported from the Linux port, opt-in (launcher checkbox, default off). FTGetData gives a
   right-eye frame the head pose of the left-eye frame before it (`pair_head`), and the
   submission thread picks images with equal poses (`match_pair` in `math.hpp`, tested in
   backend_tests). Every 4000 stereo submits events.jsonl gets a `shared_pose` line with
-  `stepped_back` and `differing` (Linux on the Frame: about 50% and 1%). On foot turn
-  compensation still changes one eye's pose during mouse turns; those pairs count as differing.
-  Needs a Steam Link or Steam Frame tester (coleblooded1 offered in #4); on the Aero check only
-  that nothing changes with it off and that it runs with it on. Plan as written 2026-10-05:
+  `stepped_back` and `differing` (Linux on the Frame: about 50% and 1%). Measured on the Aero in
+  a scene where X4 misses 90 fps (~168 late frames and ~145 fallbacks per 2 s): the port alone
+  gave 44% stepped back and 38% differing, because an eye that falls back to its older image
+  breaks the pair. Now the other eye steps back too if its older image has that pose: 50%
+  stepped back, 3 of 4000 differing. Windows only; the Linux layer does not have this step.
+  User on the Aero: cockpit and on foot look normal with it on. On foot turn compensation
+  still changes one eye's pose during mouse turns; those pairs count as differing.
+  Needs a Steam Link or Steam Frame tester (coleblooded1 offered in #4).
+  Plan as written 2026-10-05:
   Cully-Curwen (Linux port, github.com/Cully-Curwen/X4_VR_Linux) confirmed the cause: SteamVR's
   streaming link reprojects both eyes with the left eye's pose. Submitting both eyes with the
   right pose moved the ghosting to the left eye. Their fix needs no reprojection shader: one head

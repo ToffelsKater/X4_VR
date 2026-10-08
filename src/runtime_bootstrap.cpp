@@ -278,6 +278,7 @@ std::array<TaggedPose, 32> poses;
 uint64_t pose_count = 0;
 Matrix published_origin;
 bool origin_known = false;
+std::atomic_bool external_shown{false};
 std::mutex settings_mutex;
 StereoSettings cached;
 std::string capture_dir() {
@@ -320,6 +321,7 @@ StereoSettings read_settings() {
         else if (key == "theater_distance") next.theater_distance = static_cast<float>(value);
         else if (key == "theater_width") next.theater_width = static_cast<float>(value);
         else if (key == "external_vr") next.external_vr = value != 0;
+        else if (key == "external_distance") next.external_distance = static_cast<float>(value);
         else if (key == "shared_pose") next.shared_pose = value != 0;
         else if (key == "cursor") next.cursor = static_cast<int>(value);
         else if (key == "cursor_distance") next.cursor_distance = static_cast<float>(value);
@@ -452,6 +454,8 @@ void publish_view_origin(const Matrix& origin) {
     std::lock_guard lock(poses_mutex);
     published_origin = origin; origin_known = true;
 }
+void publish_external_view(bool shown) { external_shown = shown; }
+bool external_view_shown() { return external_shown; }
 bool view_origin(Matrix& origin) {
     std::lock_guard lock(poses_mutex);
     if (origin_known) origin = published_origin;

@@ -309,9 +309,11 @@ extern "C" __declspec(dllexport) BOOL __cdecl FTGetData(FreeTrackData* data) {
         }
         // A fullscreen menu (map, inventory, ...) goes to the theater screen, and so does any other
         // view without ship controls or head tracking (cutscenes, walking if the patches failed).
-        // external_vr keeps the external camera in stereo.
+        // The external camera goes there as well: X4 reads no tracker position for it, so the layer gets
+        // no pose. With external_vr the layer makes the screen fill the view.
         const bool flat = forced_theater || settings.theater == 2 ||
-                          (settings.theater == 1 && (fullscreen_menu() || !(walking || at_ship_controls() || (settings.external_vr && external_view()))));
+                          (settings.theater == 1 && (fullscreen_menu() || !(walking || at_ship_controls())));
+        x4vr::publish_external_view(settings.external_vr && !fullscreen_menu() && external_view());
         const auto tracking_head = head; // reprojection pose (tracking space)
         // Recentre on Ctrl+F12 or when stereo.txt's counter changes.
         static bool recenter_keys = false;
