@@ -1164,18 +1164,28 @@ void compositor_loop(Device d) {
         uint32_t fallbacks = 0;
         std::array<bool, 2> fresh{};
         if (!resubmit) {
+            std::array<bool, 2> use_newest{};
             for (uint32_t e = 0; e < eyes; ++e) {
                 // Unbounded only without a fallback, i.e. before anything was shown since start or a resize.
                 const auto left = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline-std::chrono::steady_clock::now()).count();
                 const bool done = d.WaitForFences(d.device, 1, &fences[e], VK_TRUE, fallback[e] ? uint64_t(std::max<int64_t>(left, 0)) : UINT64_MAX) == VK_SUCCESS;
-                const bool use_newest = done || !fallback[e];
-                fallbacks += !use_newest;
-                const auto seq = use_newest ? newest_seq[e] : older_seq[e];
+                use_newest[e] = done || !fallback[e];
+                fallbacks += !use_newest[e];
+            }
+            // Shared pose: one eye on its older image breaks the pair (as on Windows; Steam Frame report
+            // 2026-10-10, X4 at 85 fps: a third of the eye images). The other eye steps back too if its
+            // older image has that pose.
+            if (eyes == 2 && s.stereo && x4vr::linux_port::shared_pose() && use_newest[0] != use_newest[1]) {
+                const uint32_t other = use_newest[0] ? 0 : 1;
+                if (fallback[other] && !std::memcmp(&fallback_poses[other], &fallback_poses[1-other], sizeof(x4vr::Matrix))) use_newest[other] = false;
+            }
+            for (uint32_t e = 0; e < eyes; ++e) {
+                const auto seq = use_newest[e] ? newest_seq[e] : older_seq[e];
                 fresh[e] = seq != shown_seq[e];
                 shown_seq[e] = seq;
-                shown[e] = use_newest ? newest[e] : older[e];
-                textures[e].m_nImage = reinterpret_cast<uint64_t>(use_newest ? images[e] : fallback[e]);
-                if (!use_newest) poses[e] = fallback_poses[e];
+                shown[e] = use_newest[e] ? newest[e] : older[e];
+                textures[e].m_nImage = reinterpret_cast<uint64_t>(use_newest[e] ? images[e] : fallback[e]);
+                if (!use_newest[e]) poses[e] = fallback_poses[e];
             }
         }
         record.ready = std::chrono::steady_clock::now();
