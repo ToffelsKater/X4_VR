@@ -352,6 +352,7 @@ Logs are written to `X4_VR\reports\captures\debug-*\debug-events.log`; search fo
 | Headset shows only SteamVR's grey room | SteamVR must be running before the launch. The log should show `X4VR presenter: first stereo pair submitted`. |
 | Blurry | Display Mode Fullscreen at 3840×2160 (DSR enabled). |
 | Low frame rate or judder | Use a smaller DSR factor (e.g. 2560×1440) or lower graphics settings; 90 fps is needed. For short hitches, see [Smoother frames](#smoother-frames-optional). |
+| NVIDIA + Quest + Virtual Desktop: frame rate suddenly drops and stays locked low until restart | Reported by a user with a G-Sync monitor. In NVIDIA Control Panel → Manage 3D Settings → Program Settings → X4: Foundations, set Monitor Technology to *Fixed Refresh Rate* and Vertical Sync to *Off*, and let Virtual Desktop or SteamVR do the frame pacing. In Virtual Desktop, also turn off SSW, buffering, and the FOV stencil. Once the drop starts, only a restart clears it. |
 | Quest or Steam Frame: only the right eye jitters when turning the head | Stream with Virtual Desktop instead of Steam Link, or tick the launcher's Steam Link option (see [Limitations](#limitations)). |
 | World too big or too small | Adjust World scale in the launcher (`ipd_scale` in `stereo.txt`). |
 | View off-center | Look straight ahead and press Ctrl+F12. |
