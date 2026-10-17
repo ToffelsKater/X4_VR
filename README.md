@@ -272,7 +272,7 @@ for you. The other values are calibrated for X4 9.00; keys you leave out use the
 | `async_submit` | 1 | Frames go to SteamVR from a separate thread, so a game stutter repeats the last image instead of flashing. 0 = old behaviour. |
 | `pair` | 0 | Experimental: render both eyes back to back for 90 Hz per eye. Needs the game at 180 fps. |
 | `theater` | 1 | Virtual screen: 1 = for fullscreen menus and cutscenes, 0 = never, 2 = always. |
-| `theater_distance`, `theater_width` | 2, 2.2 | Distance and width of the virtual screen in metres. |
+| `theater_distance`, `theater_width` | 2, 2.2 | Distance and width of the virtual screen in metres. Also in the launcher as *Flat screen distance* and *width*. |
 | `external_vr` | 0 | 1 = for the external camera (F2/F3) the virtual screen fills your view like a window, instead of the smaller screen. The picture has no depth, because X4 does not move this camera with the head. |
 | `external_distance` | 20 | How far away that large screen stands, in metres. |
 | `shared_pose` | 0 | 1 = both eyes of a pair are drawn from one head pose. Fixes the jittering right eye over Steam Link and on the Steam Frame. |
@@ -293,8 +293,9 @@ keep what helps on your system.
 | X4's options | A longer autosave interval | Only if you notice a hitch at every autosave. |
 
 Also close tools that hook the game's graphics: Overwolf, and on some systems the Steam overlay.
-The launcher turns off the Vulkan layers of RTSS (MSI Afterburner's on-screen display) and OBS
-game capture for X4 on its own. To record the game in OBS, use window or display capture.
+The launcher turns off the Vulkan layers of RTSS (MSI Afterburner's on-screen display), OBS
+game capture and Overwolf's game capture for X4 on its own. Overwolf has other hooks as well, so
+closing it is still best. To record the game in OBS, use window or display capture.
 
 Do not start the launcher as administrator. Windows then drops the VR layer, and X4 runs flat
 with head tracking only.

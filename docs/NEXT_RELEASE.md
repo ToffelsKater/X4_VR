@@ -8,3 +8,11 @@ body when publishing, then clear this file.
 
 - Linux, Steam Frame: with "Shared pose per eye pair" on, the right eye still jittered when X4 ran
   below the headset's refresh rate. Both eyes of a pair now keep one head pose in that case too.
+- *Report a bug*: Windows Explorer showed the bug-report zip as empty. The files were there, but
+  stored under a `./` prefix that Explorer doesn't list. They now sit in a named folder.
+- Launcher: new fields for the flat screen's distance and width (menus, map, cutscenes,
+  Ctrl+F11), 0.5 to 10 m. They are saved with the profile and apply while you play (#25).
+- The launcher now also turns off Overwolf's Vulkan game capture layer for X4, which was
+  loaded into the game in #28. Closing Overwolf is still best, as it has other hooks.
+- *Report a bug*: when the VR layer never loaded, the report said `GPU: unknown`. It now lists
+  the graphics cards Windows reports and notes that the layer did not report (#21).

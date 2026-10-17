@@ -219,6 +219,13 @@ Eye dump: create `reports/captures/dump.txt`, which writes `eye-0.raw`, `eye-1.r
   steps back and halves head sampling, and the Aero and Virtual Desktop do not need it. Test
   with a Steam Link user (dshaughnessy5, the reporter, uses Quest + Steam Link). Cheaper than
   the planned right-eye warp (1-2 days).
+- **Adjustable 2D screen distance and size (issue #25, 2026-10-10):** players sometimes
+  struggle to read text on the theater screen. `theater_distance` (2 m) and `theater_width`
+  (2.2 m) exist in stereo.txt, but only as a hand edit plus restart; the Windows launcher has
+  no control for them (the Linux CLI does, 0.5 to 10 m). Add launcher fields, and possibly
+  in-game hotkeys to move/resize the screen that save back to stereo.txt. Related: #18.
+  Launcher fields done 2026-10-17: profile keys, 0.5 to 10 m, written to stereo.txt live (the
+  layer places the screen every frame). Not checked in the headset yet. Hotkeys not done.
 
 ---
 

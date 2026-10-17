@@ -29,7 +29,7 @@ using namespace x4vr::launcher;
 namespace {
 enum Id { ProfileBox = 100, SaveButton, DeleteButton, ModeAlternate, ModePair, ModeMono, ScaleBar, ScaleText,
           PredictBar, PredictText, AsyncBox, ExternalBox, SharedBox, RecenterButton, RuntimeBox, WidthEdit, HeightEdit, ChecksText, FixButton, StatusText, PlayButton, TrackerButton,
-          HudEdit, HudApply, HudRemove, HudText, SeatBox, ReportButton };
+          HudEdit, HudApply, HudRemove, HudText, SeatBox, ReportButton, ScreenDistanceEdit, ScreenWidthEdit };
 constexpr const wchar_t* project_url = L"https://github.com/ToffelsKater/X4_VR";
 
 struct App {
@@ -171,6 +171,8 @@ void fill_controls() {
     SendMessageW(app.controls[RuntimeBox], CB_SETCURSEL, uses_openxr(app.profile) ? 1 : 0, 0);
     SetWindowTextW(app.controls[WidthEdit], widen(get(app.profile, "x4_width", "0")).c_str());
     SetWindowTextW(app.controls[HeightEdit], widen(get(app.profile, "x4_height", "0")).c_str());
+    SetWindowTextW(app.controls[ScreenDistanceEdit], widen(get(app.profile, "theater_distance", "2")).c_str());
+    SetWindowTextW(app.controls[ScreenWidthEdit], widen(get(app.profile, "theater_width", "2.2")).c_str());
     app.filling = false;
 }
 void update_labels() {
@@ -197,6 +199,13 @@ void controls_changed() {
     set(app.profile, "runtime", SendMessageW(app.controls[RuntimeBox], CB_GETCURSEL, 0, 0) == 1 ? "openxr" : "openvr");
     set(app.profile, "x4_width", std::to_string(_wtoi(text_of(app.controls[WidthEdit]).c_str())));
     set(app.profile, "x4_height", std::to_string(_wtoi(text_of(app.controls[HeightEdit]).c_str())));
+    // Flat screen size in metres. Values outside 0.5-10 (an empty box, "0." while typing) keep the last good one.
+    for (const auto& [id, key] : {std::pair{ScreenDistanceEdit, "theater_distance"}, std::pair{ScreenWidthEdit, "theater_width"}}) {
+        auto text = text_of(app.controls[id]);
+        std::replace(text.begin(), text.end(), L',', L'.'); // "2,5" on comma-decimal keyboards; _wtof would read 2
+        const auto metres = _wtof(text.c_str());
+        if (metres >= 0.5 && metres <= 10) set(app.profile, key, format_number(metres));
+    }
     update_labels();
     apply_live();
 }
@@ -421,6 +430,15 @@ void report_bug() {
     std::string gpu = "unknown";
     const auto events = read_file(staging/L"events.jsonl");
     if (const auto at = events.find("\"gpu\":\""); at != std::string::npos) gpu = events.substr(at+7, events.find('"', at+7)-at-7);
+    else { // the VR layer reports the GPU; without the layer (#21), ask Windows for the desktop's adapters
+        std::set<std::wstring> adapters;
+        DISPLAY_DEVICEW device{sizeof(device)};
+        for (DWORD i = 0; EnumDisplayDevicesW(nullptr, i, &device, 0); ++i)
+            if (device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) adapters.insert(device.DeviceString);
+        std::wstring names;
+        for (const auto& adapter : adapters) names += (names.empty() ? L"" : L", ")+adapter;
+        if (!names.empty()) gpu = narrow(names)+" (VR layer did not report)";
+    }
     WIN32_FILE_ATTRIBUTE_DATA x4_file{};
     SYSTEMTIME x4_time{};
     if (GetFileAttributesExW(app.x4_exe.c_str(), GetFileExInfoStandard, &x4_file)) FileTimeToSystemTime(&x4_file.ftLastWriteTime, &x4_time);
@@ -433,8 +451,9 @@ void report_bug() {
         "\n- SteamVR running: "+(running(L"vrserver.exe") ? "yes" : "no")+"\n- HUD distance mod: "+get(hud, "scale", "off")+"\n";
     std::ofstream(staging/L"system.txt", std::ios::binary) << summary << "\nStatus panel:\n" << narrow(text_of(app.controls[StatusText]))
         << "\n\nX4 settings check:\n" << narrow(text_of(app.controls[ChecksText])) << "\n\nExtensions: " << extensions << '\n';
-    // tar ships with Windows 10 and later; -a picks the zip format from the name.
-    auto command = L"tar.exe -a -c -f \""+zip.wstring()+L"\" -C \""+staging.wstring()+L"\" .";
+    // tar ships with Windows 10 and later; -a picks the zip format from the name. Archive the folder
+    // by name: "." gives "./file" entries, which Windows Explorer shows as an empty zip.
+    auto command = L"tar.exe -a -c -f \""+zip.wstring()+L"\" -C \""+app.captures.wstring()+L"\" \""+name+L"\"";
     STARTUPINFOW startup{sizeof(startup)};
     PROCESS_INFORMATION process{};
     DWORD code = 1;
@@ -473,7 +492,9 @@ std::wstring environment_block() {
     prepend(L"VK_ADD_LAYER_PATH", bin);
     prepend(L"VK_INSTANCE_LAYERS", L"VK_LAYER_X4VR_observe");
     variables[L"SteamAppId"] = variables[L"SteamGameId"] = L"392160"; // launch directly under Steam's app context
-    variables[L"DISABLE_VULKAN_OBS_CAPTURE"] = variables[L"DISABLE_RTSS_LAYER"] = L"1"; // their Vulkan layers load even with the programs closed and break ours (#21)
+    // Their Vulkan layers load even with the programs closed and break ours (#21). Overwolf's
+    // capture layer (VK_LAYER_OW_OBS_HOOK) was seen loaded into X4 in #28.
+    for (const auto* off : {L"DISABLE_VULKAN_OBS_CAPTURE", L"DISABLE_RTSS_LAYER", L"DISABLE_VULKAN_OW_OBS_CAPTURE"}) variables[off] = L"1";
     variables[L"X4VR_CAPTURE_DIR"] = app.captures.wstring();
     variables[L"X4VR_OPENVR_BOOTSTRAP"] = L"1"; // the runtime bootstrap, whichever backend
     variables[L"X4VR_RUNTIME"] = uses_openxr(app.profile) ? L"openxr" : L"openvr";
@@ -604,28 +625,33 @@ void create_controls() {
     add(L"BUTTON", L"Recenter view (Ctrl+F12)", BS_PUSHBUTTON | WS_TABSTOP, 330, 262, 174, 26, RecenterButton);
     add(L"BUTTON", L"External views (F2/F3): screen fills the view", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 290, 488, 22, ExternalBox);
     add(L"BUTTON", L"Steam Link / Steam Frame: fix the jittering right eye", BS_AUTOCHECKBOX | WS_TABSTOP, 16, 314, 488, 22, SharedBox);
-    add(L"BUTTON", L"X4 settings", BS_GROUPBOX, 16, 348, 488, 170, 0);
-    add(L"STATIC", L"Resolution", 0, 28, 372, 80, 20, 0);
-    add(L"EDIT", L"", ES_NUMBER | WS_BORDER | WS_TABSTOP, 112, 369, 64, 24, WidthEdit);
-    add(L"STATIC", L"x", 0, 182, 372, 12, 20, 0);
-    add(L"EDIT", L"", ES_NUMBER | WS_BORDER | WS_TABSTOP, 196, 369, 64, 24, HeightEdit);
-    add(L"STATIC", L"(0 = don't check)", 0, 268, 372, 230, 20, 0);
-    add(L"STATIC", L"", 0, 28, 400, 470, 80, ChecksText);
-    add(L"BUTTON", L"Fix X4 settings", BS_PUSHBUTTON | WS_TABSTOP, 28, 484, 180, 26, FixButton);
-    add(L"STATIC", L"Backs up config.xml; X4 must be closed", 0, 216, 488, 284, 20, 0);
-    add(L"BUTTON", L"HUD distance (X4 extension, applies at the next start)", BS_GROUPBOX, 16, 526, 488, 76, 0);
-    add(L"STATIC", L"Factor", 0, 28, 550, 50, 20, 0);
-    add(L"EDIT", L"2.5", WS_BORDER | WS_TABSTOP, 80, 547, 48, 24, HudEdit);
-    add(L"BUTTON", L"Apply", BS_PUSHBUTTON | WS_TABSTOP, 136, 546, 80, 26, HudApply);
-    add(L"BUTTON", L"Remove", BS_PUSHBUTTON | WS_TABSTOP, 222, 546, 80, 26, HudRemove);
-    add(L"STATIC", L"", 0, 28, 578, 470, 20, HudText);
-    add(L"BUTTON", widen("Camera further back in ships where it sits too far forward ("+seat_ships()+")").c_str(), BS_AUTOCHECKBOX | WS_TABSTOP, 16, 608, 488, 22, SeatBox);
-    add(L"BUTTON", L"Status", BS_GROUPBOX, 16, 640, 488, 142, 0);
-    add(L"STATIC", L"", 0, 28, 660, 470, 86, StatusText);
-    add(L"BUTTON", L"Fix head-tracking path", BS_PUSHBUTTON | WS_TABSTOP, 28, 748, 180, 26, TrackerButton);
-    add(L"BUTTON", L"Play X4 in VR", BS_DEFPUSHBUTTON | WS_TABSTOP, 16, 792, 376, 40, PlayButton);
-    add(L"BUTTON", L"Report a bug", BS_PUSHBUTTON | WS_TABSTOP, 400, 792, 104, 40, ReportButton);
-    add(L"STATIC", L"In game: Ctrl+F12 recenters, Ctrl+F11 switches to the flat theater screen and back.", 0, 16, 840, 488, 20, 0);
+    add(L"STATIC", L"Flat screen distance", 0, 16, 344, 128, 20, 0);
+    add(L"EDIT", L"", WS_BORDER | WS_TABSTOP, 148, 341, 48, 24, ScreenDistanceEdit);
+    add(L"STATIC", L"m    width", 0, 202, 344, 60, 20, 0);
+    add(L"EDIT", L"", WS_BORDER | WS_TABSTOP, 266, 341, 48, 24, ScreenWidthEdit);
+    add(L"STATIC", L"m    (0.5 to 10, applies live)", 0, 320, 344, 184, 20, 0);
+    add(L"BUTTON", L"X4 settings", BS_GROUPBOX, 16, 378, 488, 170, 0);
+    add(L"STATIC", L"Resolution", 0, 28, 402, 80, 20, 0);
+    add(L"EDIT", L"", ES_NUMBER | WS_BORDER | WS_TABSTOP, 112, 399, 64, 24, WidthEdit);
+    add(L"STATIC", L"x", 0, 182, 402, 12, 20, 0);
+    add(L"EDIT", L"", ES_NUMBER | WS_BORDER | WS_TABSTOP, 196, 399, 64, 24, HeightEdit);
+    add(L"STATIC", L"(0 = don't check)", 0, 268, 402, 230, 20, 0);
+    add(L"STATIC", L"", 0, 28, 430, 470, 80, ChecksText);
+    add(L"BUTTON", L"Fix X4 settings", BS_PUSHBUTTON | WS_TABSTOP, 28, 514, 180, 26, FixButton);
+    add(L"STATIC", L"Backs up config.xml; X4 must be closed", 0, 216, 518, 284, 20, 0);
+    add(L"BUTTON", L"HUD distance (X4 extension, applies at the next start)", BS_GROUPBOX, 16, 556, 488, 76, 0);
+    add(L"STATIC", L"Factor", 0, 28, 580, 50, 20, 0);
+    add(L"EDIT", L"2.5", WS_BORDER | WS_TABSTOP, 80, 577, 48, 24, HudEdit);
+    add(L"BUTTON", L"Apply", BS_PUSHBUTTON | WS_TABSTOP, 136, 576, 80, 26, HudApply);
+    add(L"BUTTON", L"Remove", BS_PUSHBUTTON | WS_TABSTOP, 222, 576, 80, 26, HudRemove);
+    add(L"STATIC", L"", 0, 28, 608, 470, 20, HudText);
+    add(L"BUTTON", widen("Camera further back in ships where it sits too far forward ("+seat_ships()+")").c_str(), BS_AUTOCHECKBOX | WS_TABSTOP, 16, 638, 488, 22, SeatBox);
+    add(L"BUTTON", L"Status", BS_GROUPBOX, 16, 670, 488, 142, 0);
+    add(L"STATIC", L"", 0, 28, 690, 470, 86, StatusText);
+    add(L"BUTTON", L"Fix head-tracking path", BS_PUSHBUTTON | WS_TABSTOP, 28, 778, 180, 26, TrackerButton);
+    add(L"BUTTON", L"Play X4 in VR", BS_DEFPUSHBUTTON | WS_TABSTOP, 16, 822, 376, 40, PlayButton);
+    add(L"BUTTON", L"Report a bug", BS_PUSHBUTTON | WS_TABSTOP, 400, 822, 104, 40, ReportButton);
+    add(L"STATIC", L"In game: Ctrl+F12 recenters, Ctrl+F11 switches to the flat theater screen and back.", 0, 16, 870, 488, 20, 0);
     SendMessageW(app.controls[ScaleBar], TBM_SETRANGE, TRUE, MAKELPARAM(50, 200));
     SendMessageW(app.controls[PredictBar], TBM_SETRANGE, TRUE, MAKELPARAM(0, 60));
     SendMessageW(app.controls[RuntimeBox], CB_ADDSTRING, 0, LPARAM(L"OpenVR (SteamVR)"));
@@ -662,7 +688,7 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM w, LPARAM l) {
             if (code == BN_CLICKED) controls_changed();
         } else if (id == RuntimeBox && code == CBN_SELCHANGE) {
             controls_changed();
-        } else if ((id == WidthEdit || id == HeightEdit) && code == EN_CHANGE) {
+        } else if ((id == WidthEdit || id == HeightEdit || id == ScreenDistanceEdit || id == ScreenWidthEdit) && code == EN_CHANGE) {
             controls_changed();
         } else if (id == RecenterButton) {
             apply_live(1);
@@ -715,7 +741,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     type.hCursor = LoadCursorW(nullptr, IDC_ARROW); type.hbrBackground = HBRUSH(COLOR_BTNFACE+1);
     type.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     RegisterClassW(&type);
-    RECT size{0, 0, MulDiv(520, app.dpi, 96), MulDiv(868, app.dpi, 96)};
+    RECT size{0, 0, MulDiv(520, app.dpi, 96), MulDiv(898, app.dpi, 96)};
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&size, style, FALSE);
     app.window = CreateWindowExW(0, type.lpszClassName, L"X4 Native VR", style, CW_USEDEFAULT, CW_USEDEFAULT,
