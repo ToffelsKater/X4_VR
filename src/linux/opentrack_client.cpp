@@ -377,14 +377,19 @@ void sample_game_state() {
         next.walking = on_foot_tracking && !next.controlling_ship && camera_on_foot();
         // X4 smooths tracker input with alpha = 1/strength; its menu minimum is 5, which lags
         // rotation and averages alternating eye offsets away. The exported setter accepts 1.
-        // Checked on every sample: X4's Head Motion Smoothing slider sets it again whenever it moves.
+        // These act on X4's active tracker (none: they do nothing). Checked on every sample: the active
+        // tracker can be another one at first (Windows 2026-10-21: Tobii got strength 1, FreeTrack kept
+        // X4's default), and X4's Head Motion Smoothing slider sets it again whenever it moves.
         static const auto set = game_export<void (*)(int64_t)>("SetActiveHeadTrackerHeadFilterStrength");
         static const auto get = game_export<int64_t (*)()>("GetActiveHeadTrackerHeadFilterStrength");
+        static const auto tracker_name = game_export<const char* (*)()>("GetActiveHeadTrackerName");
         static bool smoothing = false;
         if (set && get && (!smoothing || get() != 1)) {
             set(1);
-            if (!smoothing) log(get() == 1 ? "X4VR pose: head smoothing disabled (strength 1)" : "X4VR pose: head smoothing change rejected");
-            else if (get() == 1) log("X4VR pose: head smoothing changed in X4's options; strength 1 again");
+            const char* name = tracker_name ? tracker_name() : nullptr;
+            const std::string tracker = std::string(" (tracker ")+(name && *name ? name : "none")+")";
+            if (!smoothing) log((get() == 1 ? "X4VR pose: head smoothing disabled (strength 1)" : "X4VR pose: head smoothing change rejected")+tracker);
+            else if (get() == 1) log("X4VR pose: head smoothing reset to strength 1"+tracker);
             smoothing = true;
         }
     }

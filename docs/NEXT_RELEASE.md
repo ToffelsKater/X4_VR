@@ -8,9 +8,11 @@ body when publishing, then clear this file.
 
 - Linux, Steam Frame: with "Shared pose per eye pair" on, the right eye still jittered when X4 ran
   below the headset's refresh rate. Both eyes of a pair now keep one head pose in that case too.
-- Moving X4's *Head Motion Smoothing* slider during a session turned X4's head smoothing back
-  on until the game restarted, which made head movement feel floaty. Even the slider's lowest
-  setting smooths a lot. The mod now turns smoothing off again whenever the slider changes it.
+- Head movement could feel smoothed and floaty from the start. The mod turns off X4's own head
+  smoothing, but on some PCs it did so for another head tracker X4 knows (Tobii), so smoothing
+  stayed on for the headset. Moving X4's *Head Motion Smoothing* slider during a session also
+  turned it back on. The mod now keeps it off for the tracker X4 is using, and the log names
+  that tracker.
 - *Report a bug*: Windows Explorer showed the bug-report zip as empty. The files were there, but
   stored under a `./` prefix that Explorer doesn't list. They now sit in a named folder.
 - Launcher: new fields for the flat screen's distance and width (menus, map, cutscenes,
