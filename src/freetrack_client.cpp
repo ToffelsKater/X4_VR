@@ -249,22 +249,26 @@ extern "C" __declspec(dllexport) BOOL __cdecl FTGetData(FreeTrackData* data) {
     std::lock_guard lock(mutex);
     if (failed) return FALSE;
     try {
+        // X4 smooths tracker input with alpha = 1/strength; its menu minimum is 5,
+        // which lags rotation and averages alternating eye offsets away. The
+        // exported setter accepts 1 (= no smoothing) and persists it.
+        static const auto set_strength = game_export<void (*)(int64_t)>("SetActiveHeadTrackerHeadFilterStrength");
+        static const auto get_strength = game_export<int64_t (*)()>("GetActiveHeadTrackerHeadFilterStrength");
         if (!runtime) {
             runtime = x4vr::acquire_runtime_bootstrap();
             unclamp_backward_position();
             disable_rival_trackers();
             on_foot_tracking = enable_on_foot_tracking();
-            // X4 smooths tracker input with alpha = 1/strength; its menu minimum is 5,
-            // which lags rotation and averages alternating eye offsets away. The
-            // exported setter accepts 1 (= no smoothing) and persists it.
-            const auto game = GetModuleHandleW(nullptr);
-            const auto set = reinterpret_cast<void (*)(int64_t)>(GetProcAddress(game, "SetActiveHeadTrackerHeadFilterStrength"));
-            const auto get = reinterpret_cast<int64_t (*)()>(GetProcAddress(game, "GetActiveHeadTrackerHeadFilterStrength"));
-            if (set && get) {
-                set(1);
-                OutputDebugStringA(get() == 1 ? "X4VR freetrack: head smoothing disabled (strength 1)\n"
-                                              : "X4VR freetrack: head smoothing change rejected\n");
+            if (set_strength && get_strength) {
+                set_strength(1);
+                OutputDebugStringA(get_strength() == 1 ? "X4VR freetrack: head smoothing disabled (strength 1)\n"
+                                                       : "X4VR freetrack: head smoothing change rejected\n");
             }
+        }
+        // X4's Head Motion Smoothing slider sets the strength again whenever it moves.
+        if (set_strength && get_strength && get_strength() != 1) {
+            set_strength(1);
+            if (get_strength() == 1) OutputDebugStringA("X4VR freetrack: head smoothing changed in X4's options; strength 1 again\n");
         }
         const auto settings = x4vr::stereo_settings();
         // On foot the camera takes the head pose one game frame later than in the cockpit

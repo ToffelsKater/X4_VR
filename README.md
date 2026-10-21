@@ -137,7 +137,7 @@ Options > Controls > Head Tracking Support:
 | OpenTrack Support | On | Enables X4's FreeTrack support, which the mod uses. "Waiting for OpenTrack connection" is normal. |
 | FreeTrack > Head Rotation Factor | 100 % | Required: the mod expects 1:1. |
 | FreeTrack > Head Position Factor | 100 % | Required. |
-| FreeTrack > Head Motion Smoothing | any | The mod turns smoothing off internally, which the slider cannot do. |
+| FreeTrack > Head Motion Smoothing | any | The mod turns smoothing off internally, which the slider cannot do. Moving the slider while you play has no lasting effect: the mod turns smoothing off again right away. |
 
 Options > Display Settings:
 
