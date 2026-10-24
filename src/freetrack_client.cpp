@@ -4,6 +4,7 @@
 #include <x4vr/code_scan.hpp>
 #include <x4vr/runtime_bootstrap.hpp>
 #include <windows.h>
+#include <MinHook.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -114,6 +115,58 @@ bool enable_on_foot_tracking() {
     }
     log_mismatch("on-foot head-pose zeroing or camera offset");
     return false;
+}
+// Cockpit HUD fixed to the ship (issue #19, measured 2026-10-24). X4 draws the head-synchronized
+// HUD presentations, the crosshair and the monitors (target panel, radar, message panel), with an
+// Anark camera that turns with the head but keeps its 90-degree projection, and stretches the
+// result over the scene, which in VR has X4's widest field of view (tan 1.54 vs 1.0). A 20-degree
+// head turn moved them 9 degrees against the head. Before X4 updates such a camera and copies it
+// into its render queue, give it the scene's projection; with hud_fixed off, its own comes back.
+// Measured with it on: 0.00 degrees of HUD motion at +-20 degrees yaw and 15 pitch; at rest the
+// crosshair's side bars sit about 20% closer to the centre.
+using HudCameraUpdate = void (*)(void* engine, void* update);
+HudCameraUpdate hud_camera_original{};
+const x4vr::code::x4::HudCamera* hud_camera{};
+void hud_camera_update(void* engine, void* update) {
+    auto* view = *reinterpret_cast<unsigned char**>(*reinterpret_cast<unsigned char**>(update)+8);
+    const auto* queue = *reinterpret_cast<const unsigned char* const*>(view+hud_camera->queue);
+    const std::string_view label = queue ? std::string_view(reinterpret_cast<const char*>(queue+hud_camera->label),
+                                                            strnlen(reinterpret_cast<const char*>(queue+hud_camera->label), 64)) : "";
+    if (label == "Anark - cockpit_crosshair" || label == "Anark - monitors") {
+        // The pose update rebuilds the projection from the camera's field of view (9.00:
+        // 0xf414c0: scale y = 1/tan(fov/2)/aspect term), so set that: tan(fov/2) grows by
+        // own scale y * game_tan_y, which makes scale y 1/game_tan_y like the scene's.
+        // X4's own values per presentation, from its first camera (views are rebuilt with a save
+        // load, with the same values); both update on X4's UI thread only.
+        struct Own { bool known; float fov, scale_y; };
+        static Own own[2]{};
+        auto& mine = own[label == "Anark - monitors"];
+        auto* camera = view+hud_camera->camera;
+        auto& fov = *reinterpret_cast<float*>(camera+hud_camera->fov);
+        if (!mine.known) mine = {true, fov, reinterpret_cast<const float*>(camera+hud_camera->projection)[5]};
+        const auto settings = x4vr::stereo_settings();
+        fov = settings.hud_fixed ? 2*std::atan(std::tan(mine.fov/2)*mine.scale_y*settings.game_tan_y) : mine.fov;
+    }
+    hud_camera_original(engine, update);
+}
+void fix_hud_camera() {
+    const auto game = GetModuleHandleW(nullptr);
+    for (const auto& version : x4vr::code::x4::hud_cameras) {
+        const auto update = x4vr::code::find_unique(game, x4vr::code::parse(version.update));
+        if (!update) continue;
+        // A detour, not the vtable slot: the cockpit HUD reaches this function by another pointer
+        // (2026-10-24: 0 reads of the slot while it copied the monitors camera).
+        hud_camera = &version;
+        void* original{};
+        const auto status = MH_Initialize();
+        if ((status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) ||
+            MH_CreateHook(const_cast<unsigned char*>(update), reinterpret_cast<void*>(&hud_camera_update), &original) != MH_OK) break;
+        hud_camera_original = reinterpret_cast<HudCameraUpdate>(original); // before the first call can arrive
+        if (MH_EnableHook(const_cast<unsigned char*>(update)) != MH_OK) break;
+        OutputDebugStringA(("X4VR freetrack: HUD camera hook installed (X4 "+std::string(version.version)+" code)\n").c_str());
+        return;
+    }
+    log_mismatch("HUD camera update");
 }
 // The rendered camera in mode 0 without a movement controller (+0x20): the player walking.
 bool camera_on_foot() {
@@ -262,6 +315,7 @@ extern "C" __declspec(dllexport) BOOL __cdecl FTGetData(FreeTrackData* data) {
             unclamp_backward_position();
             disable_rival_trackers();
             on_foot_tracking = enable_on_foot_tracking();
+            fix_hud_camera();
             if (set_strength && get_strength) {
                 set_strength(1);
                 OutputDebugStringA(((get_strength() == 1 ? "X4VR freetrack: head smoothing disabled (strength 1, tracker "

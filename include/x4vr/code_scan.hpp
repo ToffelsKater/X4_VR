@@ -129,6 +129,29 @@ inline constexpr RivalTrackers rival_trackers[] = {
      "48 89 bb f0 04 00 00"},
 };
 
+// AnarkRenderEngine's camera update for a head-synchronized UI presentation (vtable +0x48, but
+// the cockpit HUD calls it by another pointer): view = [[update]+8]; sets the pose of the view's camera and copies the camera
+// (0xd10 bytes) into the view's render queue entry. The camera keeps the projection it was
+// created with. Label and projection offsets were measured on 9.00 (tools/peek_camera.py).
+struct HudCamera {
+    const char* version;
+    std::string_view update;
+    size_t camera, queue; // in the view: the camera, the pointer to its render queue entry
+    size_t label;         // in the queue entry: 64-byte name, "Anark - <presentation>"
+    size_t projection;    // in the camera: row-major 4x4 floats, rebuilt by the pose update
+    size_t fov;           // in the camera: field of view (radians) the projection is built from
+};
+inline constexpr HudCamera hud_cameras[] = {
+    {"9.00", // 0xb31e60
+     "48 89 5c 24 08 57 48 81 ec a0 00 00 00 0f 10 82 88 00 00 00 48 8d 4c 24 20 0f 10 8a 98 00 00 00 0f 11 44 24 20 "
+     "0f 10 82 a8 00 00 00 0f 11 4c 24 30 0f 10 8a b8 00 00 00 0f 11 44 24 40 0f 11 4c 24 50 e8 ?? ?? ?? ?? "
+     "0f 10 44 24 20 0f 10 4c 24 30 48 8b 02 48 8d 54 24 60 0f 29 44 24 60 0f 10 44 24 40 0f 29 4c 24 70 "
+     "0f 10 4c 24 50 0f 29 84 24 80 00 00 00 0f 29 8c 24 90 00 00 00 48 8b 78 08 48 8d 8f 90 00 00 00 e8 ?? ?? ?? ?? "
+     "48 8b 4f 30 48 8d 97 90 00 00 00 48 83 c1 10 41 b8 10 0d 00 00 e8 ?? ?? ?? ?? 48 8b 9c 24 b0 00 00 00 "
+     "c6 87 e4 0d 00 00 01 48 81 c4 a0 00 00 00 5f c3",
+     0x90, 0x30, 0xf0c, 0x140, 0xcc8},
+};
+
 // X4's FreeTrack tracker (RTTI VR::FreeTrack).
 struct Tracker {
     const char* version;

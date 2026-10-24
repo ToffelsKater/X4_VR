@@ -62,6 +62,7 @@ int main(int argc, char** argv) {
         const bool trackir = unique("trackir", row.trackir);
         return unique("tobii", row.tobii) && trackir;
     });
+    versions("HUD fixed to the ship", x4::hud_cameras, [](const x4::HudCamera& row) { return unique("update", row.update) != nullptr; });
     const auto half = find_all(base, parse(x4::frame_half));
     bool agree = !half.empty();
     for (const auto* reader : half) agree = agree && rip_target(reader, 3, 7) == rip_target(half[0], 3, 7);

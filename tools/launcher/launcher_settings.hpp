@@ -43,7 +43,7 @@ inline void set(Settings& settings, const std::string& key, const std::string& v
 // x4_width/x4_height are the launcher's own (the resolution the X4 check expects). runtime (openvr
 // or openxr) is read by the game at startup from X4VR_RUNTIME; stereo.txt keeps it for bug reports.
 inline const std::vector<std::string>& profile_keys() {
-    static const std::vector<std::string> keys{"stereo", "pair", "ipd_scale", "predict", "async_submit", "external_vr", "shared_pose",
+    static const std::vector<std::string> keys{"stereo", "pair", "ipd_scale", "predict", "async_submit", "external_vr", "shared_pose", "hud_fixed",
                                                "theater_distance", "theater_width", "runtime", "x4_width", "x4_height"};
     return keys;
 }
@@ -61,6 +61,13 @@ inline Settings compose_live(const Settings& defaults, const Settings& profile, 
     for (const auto& [key, value] : profile) if (key.rfind("x4_", 0) != 0) set(out, key, value);
     if (!recenter.empty()) set(out, "recenter", recenter);
     return out;
+}
+
+// The profile with the VR keys of the live stereo.txt on top: a launcher restart keeps what the
+// game last used, unsaved changes included (Save still writes them into the profile).
+inline Settings with_live(Settings profile, const Settings& live) {
+    for (const auto& [key, value] : profile_of(live)) set(profile, key, value);
+    return profile;
 }
 
 inline bool uses_openxr(const Settings& profile) { return get(profile, "runtime") == "openxr"; }

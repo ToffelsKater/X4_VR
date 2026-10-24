@@ -133,6 +133,11 @@ struct StereoSettings { bool stereo = true; int delay = 2, recenter = 0; float i
     // eye offset), so its picture is flat. Submitted as eye images it lagged behind the head, and from
     // a fixed pose each eye ran out of picture on its own side when looking left or right.
     bool external_vr = false; float external_distance = 20.f;
+    // 1: the cockpit HUD (crosshair, target panel, radar, message panel) stays fixed to the ship.
+    // X4 draws it with a 90-degree camera that turns with the head and stretches the result over
+    // the wider scene, so it moved against head turns (issue #19); its camera gets the scene's
+    // projection (FreeTrack client, hud_camera_update).
+    bool hud_fixed = false;
     // One head pose per eye pair, for SteamVR's streaming link (Steam Link, Steam Frame), which
     // reprojects both eyes with the left eye's pose (issue #4). X4 builds the right eye from the
     // left eye's head pose, and the submission thread pairs images with equal poses. The eye that

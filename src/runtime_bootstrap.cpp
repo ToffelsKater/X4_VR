@@ -322,6 +322,7 @@ StereoSettings read_settings() {
         else if (key == "theater_width") next.theater_width = static_cast<float>(value);
         else if (key == "external_vr") next.external_vr = value != 0;
         else if (key == "external_distance") next.external_distance = static_cast<float>(value);
+        else if (key == "hud_fixed") next.hud_fixed = value != 0;
         else if (key == "shared_pose") next.shared_pose = value != 0;
         else if (key == "cursor") next.cursor = static_cast<int>(value);
         else if (key == "cursor_distance") next.cursor_distance = static_cast<float>(value);

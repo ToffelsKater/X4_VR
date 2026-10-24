@@ -35,7 +35,7 @@ struct Watch {
     std::map<DWORD, HANDLE> threads;
     std::array<uintptr_t, 4> address{};
     std::array<bool, 4> write_only{};
-    std::map<std::pair<int, uintptr_t>, unsigned> hits;
+    std::map<std::tuple<int, uintptr_t, uintptr_t>, unsigned> hits; // register, accessor RIP, [rsp] (caller of a leaf accessor)
     unsigned total{};
     bool armed{};
     ULONGLONG checked{}, reported{};
@@ -76,7 +76,8 @@ struct Watch {
     void report(std::ofstream& log) {
         log << "watch report total=" << total << "\n";
         for (auto& [key, count] : hits)
-            log << "  dr" << key.first << " rip=0x" << std::hex << key.second << std::dec << " hits=" << count << "\n";
+            log << "  dr" << std::get<0>(key) << " rip=0x" << std::hex << std::get<1>(key) << " stack=0x" << std::get<2>(key)
+                << std::dec << " hits=" << count << "\n";
     }
 };
 // Optional execution breakpoints, read when the game starts from %X4VR_CAPTURE_DIR%/trace_rvas.txt
@@ -235,8 +236,11 @@ int wmain(int argc, wchar_t** argv) {
             const HANDLE thread = watch.threads[event.dwThreadId];
             CONTEXT context{}; context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
             if (GetThreadContext(thread, &context) && (context.Dr6 & 0xf)) {
+                CONTEXT control{}; control.ContextFlags = CONTEXT_CONTROL;
+                uintptr_t caller = 0; // a leaf accessor such as memcpy: its return address
+                if (GetThreadContext(thread, &control)) ReadProcessMemory(process_handle.value, reinterpret_cast<void*>(control.Rsp), &caller, sizeof(caller), nullptr);
                 for (int i = 0; i < 4; ++i) if (context.Dr6 & (1ull << i))
-                    ++watch.hits[{i, reinterpret_cast<uintptr_t>(event.u.Exception.ExceptionRecord.ExceptionAddress)}];
+                    ++watch.hits[{i, reinterpret_cast<uintptr_t>(event.u.Exception.ExceptionRecord.ExceptionAddress), caller}];
                 context.Dr6 = 0;
                 if (++watch.total >= 20000) { watch.armed = false; context.Dr7 = 0; watch.report(log); log << "watch auto-disarmed\n"; for (auto& [id, other] : watch.threads) if (other != thread) watch.apply(other); }
                 SetThreadContext(thread, &context);

@@ -3,21 +3,9 @@
 Entries for the next GitHub release notes, in release-note wording. Move them into the release
 body when publishing, then clear this file.
 
-<!-- Headset check owed: the Steam Frame fix below is built by the Linux CI only and waits for a
-     Steam Frame player to confirm it. -->
-
-- Linux, Steam Frame: with "Shared pose per eye pair" on, the right eye still jittered when X4 ran
-  below the headset's refresh rate. Both eyes of a pair now keep one head pose in that case too.
-- Head movement could feel smoothed and floaty from the start. The mod turns off X4's own head
-  smoothing, but on some PCs it did so for another head tracker X4 knows (Tobii), so smoothing
-  stayed on for the headset. Moving X4's *Head Motion Smoothing* slider during a session also
-  turned it back on. The mod now keeps it off for the tracker X4 is using, and the log names
-  that tracker.
-- *Report a bug*: Windows Explorer showed the bug-report zip as empty. The files were there, but
-  stored under a `./` prefix that Explorer doesn't list. They now sit in a named folder.
-- Launcher: new fields for the flat screen's distance and width (menus, map, cutscenes,
-  Ctrl+F11), 0.5 to 10 m. They are saved with the profile and apply while you play (#25).
-- The launcher now also turns off Overwolf's Vulkan game capture layer for X4, which was
-  loaded into the game in #28. Closing Overwolf is still best, as it has other hooks.
-- *Report a bug*: when the VR layer never loaded, the report said `GPU: unknown`. It now lists
-  the graphics cards Windows reports and notes that the layer did not report (#21).
+<!-- Checks still owed from 0.6.0:
+     - Linux Steam Frame fix (shared pose): built by the Linux CI only, waits for a Steam Frame player.
+     - Flat screen distance and width fields: not checked in the headset yet.
+     - Side panels on foot default 0.6 (0.4 overlapped the conversation menu once the HUD scaled):
+       not checked in the headset yet.
+     - Linux x4vr menu has no Side panels setting yet; it uses the defaults (ship 1, on foot 0.6). -->

@@ -77,7 +77,7 @@ target_link_libraries(x4_openvr PUBLIC openvr OpenXR::headers PRIVATE OpenXR::op
 target_compile_options(x4_openvr PRIVATE /W4 /WX /permissive-)
 target_link_libraries(x4vr_native_pose PRIVATE x4_openvr)
 add_library(FreeTrackClient64 SHARED src/freetrack_client.cpp)
-target_link_libraries(FreeTrackClient64 PRIVATE x4_openvr)
+target_link_libraries(FreeTrackClient64 PRIVATE x4_openvr x4_minhook)
 target_compile_definitions(FreeTrackClient64 PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(FreeTrackClient64 PRIVATE /W4 /WX /permissive-)
 add_executable(pose_control tools/pose_control.cpp)

@@ -30,6 +30,17 @@ inline const std::vector<std::string>& hud_scripts() {
         "ui/core/lua/subchannelbar.lua", "ui/core/lua/overlay.lua"};
     return files;
 }
+// X4 9.00 ships each UI script as .lua and as .xpl (precompiled) and loads the .xpl first, on Linux
+// (2026-10-04) and on Windows (2026-10-24: the order flag at 0xb22613; the Windows mod's patched
+// .lua scales never applied). The patched Lua source goes to the .xpl path too: Lua's loader takes
+// source or bytecode.
+inline std::string xpl_of(const std::string& lua) { return lua.substr(0, lua.size()-4)+".xpl"; }
+// Every game file the mod is built from: anchors, scripts and their precompiled copies.
+inline std::set<std::string> hud_sources() {
+    std::set<std::string> paths(hud_anchor_files().begin(), hud_anchor_files().end());
+    for (const auto& script : hud_scripts()) { paths.insert(script); paths.insert(xpl_of(script)); }
+    return paths;
+}
 inline std::string format_number(double value) {
     char text[32];
     std::snprintf(text, sizeof(text), "%.7g", value);
@@ -47,18 +58,40 @@ template<class Replace> std::string rewrite(const std::string& text, const std::
     }
     return out.append(last, text.cend());
 }
+// Conversation menu (anchor uianchor_dialogmenu, script dialogmenu.lua): X4 puts it 19.5 degrees
+// below the view centre at the HUD's depth, too low and too close in a headset. It goes
+// dialog_distance times farther than the rest of the HUD (its script scale follows, so the same
+// apparent size), and its height shrinks by dialog_raise: about 5 degrees below the centre.
+// Headset check 2026-10-24: 1.5 and 0.5 (10 degrees) were too far and still too low; 1.2 and
+// 0.25 better.
+inline constexpr double dialog_distance = 1.2, dialog_raise = 0.25;
+// Lower-corner panels (message ticker bottom left, target panel bottom right) sit about 30 degrees
+// to the side and 19 down. Their sideways and vertical offsets shrink by a pull factor, one for the
+// cockpit and one on foot (the launcher's "Side panels" fields). On foot the HUD follows the camera,
+// and the headset's round lens view cut the panels off: never in view, 0.4 right while the panels
+// were too small (2026-10-24), but at their real size 0.4 overlapped the conversation options, so
+// 0.6. In the cockpit the HUD stays on the ship, and 0.4 put the target panel next to the
+// crosshair: X4's place there ("perfect", 2026-10-24).
+inline constexpr double corner_pull = 1, foot_pull = 0.6;
+// Part of the installed mod's source hash: change it when hud_files changes its output, so
+// installed mods rebuild at the next start.
+inline constexpr const char* hud_layout = "layout-6";
 // Positions of HUD anchor connections (tags uianchor_*, except the menu anchors) times k.
-inline std::string scale_anchor_positions(const std::string& xml, double k, int& count) {
+inline std::string scale_anchor_positions(const std::string& xml, double k, int& count, double pull = corner_pull) {
     static const std::regex connection(R"re(<connection [^>]*tags="([^"]*)"[^>]*>[\s\S]*?</connection>)re");
     static const std::regex position(R"re(<position x="([^"]+)" y="([^"]+)" z="([^"]+)")re");
     static const std::regex hud_tag(R"re((^|\s)uianchor_)re"), menu_tag(R"re((^|\s)uianchor_(front|left|right)(\s|$))re");
+    static const std::regex dialog_tag(R"re((^|\s)uianchor_dialogmenu(\s|$))re");
+    static const std::regex corner_tag(R"re((^|\s)uianchor_(messageticker|messageticker_plain|eventmonitor)(\s|$))re");
     int connections = 0;
     return rewrite(xml, connection, [&](const std::smatch& m) {
         const std::string block = m[0], tags = m[1];
         if (!std::regex_search(tags, hud_tag) || std::regex_search(tags, menu_tag)) return block;
+        const bool dialog = std::regex_search(tags, dialog_tag), corner = std::regex_search(tags, corner_tag);
+        const double kz = dialog ? k*dialog_distance : k, kx = corner ? kz*pull : kz, ky = dialog ? kz*dialog_raise : kx;
         return rewrite(block, position, [&](const std::smatch& p) {
-            return "<position x=\""+format_number(std::stod(p[1])*k)+"\" y=\""+format_number(std::stod(p[2])*k)+
-                   "\" z=\""+format_number(std::stod(p[3])*k)+"\"";
+            return "<position x=\""+format_number(std::stod(p[1])*kx)+"\" y=\""+format_number(std::stod(p[2])*ky)+
+                   "\" z=\""+format_number(std::stod(p[3])*kz)+"\"";
         }, count);
     }, connections);
 }
@@ -66,6 +99,57 @@ inline std::string scale_anchor_positions(const std::string& xml, double k, int&
 inline std::string scale_presentation_factors(const std::string& lua, double k, int& count) {
     static const std::regex factor(R"re(\b(scalingFactor|targetMonitorScaleFactor|radarScaleFactor|messageTickerScaleFactor|missionBarScaleFactor)(\s*=\s*)([0-9]+\.[0-9]+))re");
     return rewrite(lua, factor, [&](const std::smatch& m) { return m[1].str()+m[2].str()+format_number(std::stod(m[3])*k); }, count);
+}
+
+// On foot the corner panels move from the cockpit pull to the on-foot pull. The anchors (XML) are
+// shared, so monitors.lua shifts the panel inside its anchor while X4's game plan is "firstperson".
+// The shift is the anchor's move between the two pulls (ui_screen_positions.xml, metres), in the
+// anchor's own x and y axes (its quaternion), since the panel element lives in the anchor's frame.
+// The panel moves within its own tilted plane: the target panel (anchor turned ~31 degrees) ends
+// about 3 degrees farther out and a little farther away than the exact pull would put it.
+struct PanelShift { double x = 0, y = 0; };
+inline bool foot_shift(const std::string& xml, const std::string& tag, double k, double pull, double foot, PanelShift& out) {
+    const std::regex connection("<connection [^>]*tags=\""+tag+"\"[^>]*>[\\s\\S]*?</connection>");
+    static const std::regex position(R"re(<position x="([^"]+)" y="([^"]+)")re");
+    static const std::regex rotation(R"re(<quaternion qx="([^"]+)" qy="([^"]+)" qz="([^"]+)" qw="([^"]+)")re");
+    std::smatch c, p, q;
+    if (!std::regex_search(xml, c, connection)) return false;
+    const std::string block = c[0];
+    if (!std::regex_search(block, p, position)) return false;
+    double x = 0, y = 0, z = 0, w = 1;
+    if (std::regex_search(block, q, rotation)) x = std::stod(q[1]), y = std::stod(q[2]), z = std::stod(q[3]), w = std::stod(q[4]);
+    const double dx = k*(foot-pull)*std::stod(p[1]), dy = k*(foot-pull)*std::stod(p[2]);
+    out = {dx*(1-2*(y*y+z*z))+dy*2*(x*y+z*w), dx*2*(x*y-z*w)+dy*(1-2*(x*x+z*z))}; // onto the anchor's x and y axes
+    return true;
+}
+// monitors.lua with the on-foot shift of the target panel ("Monitor") and the ticker; `count`
+// gets the number of places patched (3 when the script is as expected).
+inline std::string shift_panels_on_foot(std::string lua, PanelShift monitor, PanelShift ticker, int& count) {
+    const auto insert = [&](const std::regex& at, const std::string& text, bool after) {
+        std::smatch m;
+        if (!std::regex_search(lua, m, at)) return;
+        const auto spot = size_t(m.position(0)+(after ? m.length(0) : 0));
+        lua.insert(spot, text);
+        ++count;
+    };
+    static const std::regex init(R"re(function self:onInitialize\(\))re");
+    static const std::regex place(R"re(\t\tsetAttribute\(mainelement, "position\.y", mainelementoffset\.y\)\r?\n)re");
+    static const std::regex plan(R"re(function onGamePlanChange\(_, gameplan\)\r?\n)re");
+    insert(init, "-- X4 VR (X4VRLauncher, side panels on foot): shift in metres along each anchor's x and y\n"
+        "local x4vrFoot = { Monitor = { "+format_number(monitor.x)+", "+format_number(monitor.y)+" }, ticker = { "+
+        format_number(ticker.x)+", "+format_number(ticker.y)+" } }\n"
+        "local x4vrPanels = {}\n"
+        "local function x4vrPlace(name, onfoot)\n"
+        "\tlocal panel, shift = x4vrPanels[name], x4vrFoot[name]\n"
+        "\tif not panel or not shift then return end\n"
+        "\tlocal foot = onfoot and 1 or 0\n"
+        "\tsetAttribute(panel.element, \"position.x\", panel.x + foot * shift[1] / panel.scale)\n"
+        "\tsetAttribute(panel.element, \"position.y\", panel.y + foot * shift[2] / panel.scale)\n"
+        "end\n\n", false);
+    insert(place, "\t\tx4vrPanels[childElement] = { element = mainelement, x = mainelementoffset.x, y = mainelementoffset.y, scale = appliedscale }\n"
+        "\t\tx4vrPlace(childElement, IsFirstPerson())\n", true);
+    insert(plan, "\tx4vrPlace(\"Monitor\", gameplan == \"firstperson\")\n\tx4vrPlace(\"ticker\", gameplan == \"firstperson\")\n", true);
+    return lua;
 }
 
 // X4's per-user content.xml (next to config.xml) remembers extensions turned off in its Extensions
@@ -114,19 +198,31 @@ inline std::map<std::string, std::string> read_game_files(const std::filesystem:
 }
 // Patched copies of every file the mod replaces; empty with `error` set if a file is missing or
 // no longer looks as expected (a game update).
-inline std::map<std::string, std::string> hud_files(const std::map<std::string, std::string>& originals, double k, std::string& error) {
+inline std::map<std::string, std::string> hud_files(const std::map<std::string, std::string>& originals, double k, std::string& error,
+                                                    double pull = corner_pull, double foot = foot_pull) {
     std::map<std::string, std::string> out;
     for (const auto& path : hud_anchor_files()) {
         const auto source = originals.find(path);
         int count = 0;
-        if (source != originals.end()) out[path] = scale_anchor_positions(source->second, k, count);
+        if (source != originals.end()) out[path] = scale_anchor_positions(source->second, k, count, pull);
         if (count < 3) { error = "unexpected "+path; return {}; }
     }
+    PanelShift monitor, ticker;
+    const auto anchors = originals.find("assets/ui/ui_screen_positions.xml");
+    if (anchors == originals.end() || !foot_shift(anchors->second, "uianchor_eventmonitor", k, pull, foot, monitor) ||
+        !foot_shift(anchors->second, "uianchor_messageticker", k, pull, foot, ticker)) { error = "unexpected corner anchors"; return {}; }
     for (const auto& path : hud_scripts()) {
         const auto source = originals.find(path);
         int count = 0;
-        if (source != originals.end()) out[path] = scale_presentation_factors(source->second, k, count);
+        const double factor = path == "ui/core/lua/dialogmenu.lua" ? k*dialog_distance : k;
+        if (source != originals.end()) out[path] = scale_presentation_factors(source->second, factor, count);
         if (count < 1) { error = "unexpected "+path; return {}; }
+        if (path == "ui/core/lua/monitors.lua") {
+            int places = 0;
+            out[path] = shift_panels_on_foot(out[path], monitor, ticker, places);
+            if (places != 3) { error = "unexpected "+path; return {}; }
+        }
+        if (originals.count(xpl_of(path))) out[xpl_of(path)] = out[path];
     }
     return out;
 }

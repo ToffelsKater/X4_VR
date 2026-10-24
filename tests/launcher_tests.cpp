@@ -24,6 +24,10 @@ int main() {
     const auto options = compose_live(defaults, parse_settings("external_vr=1\nshared_pose=1\ntheater_distance=3\ntheater_width=4.5\n"), "0");
     CHECK(get(options, "external_vr") == "1" && get(profile_of(options), "shared_pose") == "1");
     CHECK(get(options, "theater_distance") == "3" && get(profile_of(options), "theater_width") == "4.5");
+    // Launcher restart: the live file's VR keys win over the saved profile, calibration stays out.
+    const auto restored = with_live(parse_settings("stereo=1\nx4_width=3840\n"), parse_settings("hud_fixed=1\nyaw_gain=2\nstereo=0\n"));
+    CHECK(get(restored, "hud_fixed") == "1" && get(restored, "stereo") == "0");
+    CHECK(get(restored, "x4_width") == "3840" && get(restored, "yaw_gain").empty());
     // VR runtime: OpenVR unless the profile says openxr; kept in profiles (and stereo.txt, for reports).
     CHECK(!uses_openxr(profile) && uses_openxr(parse_settings("runtime=openxr\n")));
     CHECK(get(profile_of(compose_live(defaults, parse_settings("runtime=openxr\n"), "0")), "runtime") == "openxr");
@@ -63,15 +67,19 @@ int main() {
         "<quaternion qx=\"0\" qy=\"0\" qz=\"0\" qw=\"-1\"/>\n</offset>\n</connection>\n"
         "<connection name=\"con_menu_front\" tags=\"uianchor_front \">\n<offset>\n<position x=\"0\" y=\"0\" z=\"0.3469819\"/>\n</offset>\n</connection>\n"
         "<connection name=\"con_ticker\" tags=\"uianchor_messageticker_plain \">\n<offset>\n<position x=\"-0.2\" y=\"-0.166\" z=\"4.587704E-02\"/>\n</offset>\n</connection>\n"
-        "<connection name=\"part\" tags=\"part nocollision\">\n<offset>\n<position x=\"1\" y=\"1\" z=\"1\"/>\n</offset>\n</connection>\n";
+        "<connection name=\"part\" tags=\"part nocollision\">\n<offset>\n<position x=\"1\" y=\"1\" z=\"1\"/>\n</offset>\n</connection>\n"
+        "<connection name=\"con_dialogmenu\" tags=\"uianchor_dialogmenu\">\n<offset>\n<position x=\"0\" y=\"-0.1125771\" z=\"0.3180768\"/>\n</offset>\n</connection>\n";
     int moved = 0;
     const auto scaled = scale_anchor_positions(anchors, 2.5, moved);
-    CHECK(moved == 2);
+    CHECK(moved == 3);
+    CHECK(scaled.find("<position x=\"0\" y=\"-0.08443283\" z=\"0.9542304\"") != std::string::npos); // conversation: farther, higher
     CHECK(scaled.find("<position x=\"0\" y=\"-0.25\" z=\"0.726580") != std::string::npos);
     CHECK(scaled.find("<position x=\"0\" y=\"0\" z=\"0.3469819\"") != std::string::npos); // menu anchor unchanged
-    CHECK(scaled.find("<position x=\"-0.5\" y=\"-0.415\" z=\"0.1146926\"") != std::string::npos);
+    CHECK(scaled.find("<position x=\"-0.5\" y=\"-0.415\" z=\"0.1146926\"") != std::string::npos); // corner panel, cockpit default: X4's place
     CHECK(scaled.find("<position x=\"1\" y=\"1\" z=\"1\"") != std::string::npos); // not a UI anchor
     CHECK(scaled.find("qw=\"-1\"") != std::string::npos);
+    moved = 0; // the launcher's Side panels value pulls the corner panels in
+    CHECK(scale_anchor_positions(anchors, 2.5, moved, 0.4).find("<position x=\"-0.2\" y=\"-0.166\" z=\"0.1146926\"") != std::string::npos);
     int factors = 0;
     const auto lua = scale_presentation_factors("local config = {\n\tscalingFactor = 0.0004, -- note\n\tradarScaleFactor = 0.0002,\n}\n"
         "if config.scalingFactor == 0.5 then end\nprivate.scalingFactor = private.scalingFactor * 2\n", 2.5, factors);
@@ -80,6 +88,27 @@ int main() {
     CHECK(lua.find("== 0.5") != std::string::npos);
     std::string error;
     CHECK(hud_files({}, 2.5, error).empty() && !error.empty()); // missing game files: nothing half-built
+    // X4 loads a script's precompiled .xpl first: the patched source goes there too.
+    std::map<std::string, std::string> originals;
+    const std::string anchor = "<connection name=\"a\" tags=\"uianchor_x\">\n<offset>\n<position x=\"0\" y=\"0\" z=\"1\"/>\n</offset>\n</connection>\n";
+    for (const auto& path : hud_anchor_files()) originals[path] = anchor+anchor+anchor;
+    originals["assets/ui/ui_screen_positions.xml"] +=
+        "<connection name=\"con_em\" tags=\"uianchor_eventmonitor\">\n<offset>\n<position x=\"0.2\" y=\"-0.14\" z=\"0.35\"/>\n</offset>\n</connection>\n"
+        "<connection name=\"con_mt\" tags=\"uianchor_messageticker\">\n<offset>\n<position x=\"-0.2\" y=\"-0.14\" z=\"0.35\"/>\n</offset>\n</connection>\n";
+    for (const auto& path : hud_scripts()) originals[path] = "local config = { scalingFactor = 0.0004 }\n";
+    originals["ui/core/lua/monitors.lua"] += "function self:onInitialize()\nend\nfunction onGamePlanChange(_, gameplan)\nend\n"
+        "function initScale()\n\t\tsetAttribute(mainelement, \"position.y\", mainelementoffset.y)\r\nend\n";
+    originals["ui/core/lua/monitors.xpl"] = "precompiled";
+    const auto built = hud_files(originals, 2.5, error, 1, 0.4);
+    CHECK(built.count("ui/core/lua/monitors.xpl") && built.at("ui/core/lua/monitors.xpl") == built.at("ui/core/lua/monitors.lua"));
+    CHECK(built.at("ui/core/lua/monitors.lua").find("scalingFactor = 0.001") != std::string::npos);
+    CHECK(!built.count("ui/core/lua/compass.xpl")); // no game .xpl, none written
+    // On foot: the unrotated target panel anchor moves by 2.5 * (0.4 - 1) * (0.2, -0.14) metres.
+    CHECK(built.at("ui/core/lua/monitors.lua").find("Monitor = { -0.3, 0.21 }") != std::string::npos);
+    CHECK(built.at("ui/core/lua/monitors.lua").find("x4vrPlace(childElement, IsFirstPerson())") != std::string::npos);
+    CHECK(hud_files(originals, 2.5, error, 1, 0.4).size() == built.size());
+    originals["ui/core/lua/monitors.lua"] = "local config = { scalingFactor = 0.0004 }\n"; // script changed by an update
+    CHECK(hud_files(originals, 2.5, error).empty());
     // X4's user content.xml: only our entry is turned back on.
     bool was_disabled = false;
     const auto content = enable_extension("<content>\n  <extension id=\"ws_1\" enabled=\"false\"/>\n"

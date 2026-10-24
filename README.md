@@ -171,6 +171,14 @@ Start `X4VRLauncher.exe` in the `X4_VR` folder while X4 is closed. In the *HUD d
 enter a factor and press *Apply*. At 2.5 the HUD sits 2.5 times further away and looks the same
 size; any value from 1 to 6 works. *Remove* takes the HUD back to X4's default.
 
+The extension also moves two panels that X4 puts in the lower corners, where the headset's lenses
+cut them off: the message panel (bottom left) and the target panel (bottom right, which also
+shows the skills of the person you talk to). *Side panels* sets how far they move toward the
+centre, once for the ship and once on foot: 1 is X4's own place, smaller is closer; values from
+0.2 to 1 work. The defaults are 1 in the ship, where the HUD stays on the cockpit and you can
+turn your head to the panels, and 0.6 on foot, where the HUD follows your view.
+The conversation menu also sits a bit further away and higher than in X4.
+
 This writes the extension `extensions\x4vr_hud` in your X4 folder. It is generated from your
 own game files, so nothing from Egosoft is part of this repository, and savegames don't depend
 on it. When a game update changes those files, the launcher rebuilds the extension the next time
@@ -217,10 +225,10 @@ direction the game points it.
 Ctrl+F11 is the way out of anything that doesn't work in VR yet, such as an unusual camera or a
 menu that is hard to read in 3D. Press it again to return to VR.
 
-The launcher stays open while you play. Changes you make in it apply within half a second, and
-it shows the frame rate the headset is getting. It keeps profiles with your VR mode, world
-scale, prediction, stutter protection and the X4 resolution you want: type a name and press
-*Save*. It comes with two, *Default* and *Pair 90 Hz (experimental)*.
+The launcher stays open while you play. Changes you make in it apply within half a second, are
+kept when you restart the launcher, and it shows the frame rate the headset is getting. It keeps
+profiles with your VR mode, world scale, prediction, stutter protection and the X4 resolution
+you want: type a name and press *Save*. It comes with two, *Default* and *Pair 90 Hz (experimental)*.
 
 You can also start the game without the launcher:
 `powershell -ExecutionPolicy Bypass -File X4_VR\scripts\play.ps1`
@@ -255,8 +263,8 @@ Your settings, saved profiles and HUD extension stay as they are.
 ## Fine-tuning (optional)
 
 `X4_VR\reports\captures\stereo.txt` is re-read every half second while you play. The launcher
-writes `stereo`, `pair`, `ipd_scale`, `predict`, `async_submit`, `external_vr` and `shared_pose`
-for you. The other values are calibrated for X4 9.00; keys you leave out use their defaults.
+writes `stereo`, `pair`, `ipd_scale`, `predict`, `async_submit`, `external_vr`, `shared_pose` and
+`hud_fixed` for you. The other values are calibrated for X4 9.00; keys you leave out use their defaults.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -276,6 +284,7 @@ for you. The other values are calibrated for X4 9.00; keys you leave out use the
 | `external_vr` | 0 | 1 = for the external camera (F2/F3) the virtual screen fills your view like a window, instead of the smaller screen. The picture has no depth, because X4 does not move this camera with the head. |
 | `external_distance` | 20 | How far away that large screen stands, in metres. |
 | `shared_pose` | 0 | 1 = both eyes of a pair are drawn from one head pose. Fixes the jittering right eye over Steam Link and on the Steam Frame. |
+| `hud_fixed` | 0 | 1 = the cockpit HUD (crosshair, target panel, radar, message panel) stays fixed to the ship instead of moving against your head turns. In the launcher as *Cockpit HUD fixed to the ship*. X4 9.00 only. |
 | `cursor`, `cursor_distance` | 1, 5 | Mouse cursor on (1) or off (0), and how far it floats in the stereo view, in metres. |
 | `turn_comp` | 1 | Mouse-turn compensation: 1 = on foot, 0 = off, 2 = also in the cockpit (there it keeps the world aligned during ship turns but shifts the cockpit interior instead). |
 
@@ -311,6 +320,13 @@ flashes.
 The HUD is drawn into the rendered image, so it has no VR layer of its own. The HUD distance
 extension moves the cockpit HUD, but small popup menus in the cockpit, such as the interaction
 menu, stay at X4's original close distance.
+
+By default the cockpit HUD moves against your head: look right and it slides left across the
+cockpit. X4 draws the HUD with a narrower field of view than the scene and stretches it over the
+image, so every head turn moves it about 1.5 times as far as the cockpit. *Cockpit HUD fixed to
+the ship* in the launcher gives the HUD the scene's field of view: it then stays on the ship, with
+the crosshair on the gunline, and sits slightly closer to the centre. The setting applies while
+you play. The infobar and compass are not affected; they stay in front of your eyes.
 
 On wide-FOV headsets there is a small black band at the very bottom of the view, because X4's
 maximum FOV is a bit smaller than the Varjo Aero's. Quest 3 players see it too.
@@ -358,6 +374,7 @@ Logs are written to `X4_VR\reports\captures\debug-*\debug-events.log`; search fo
 | World too big or too small | Adjust World scale in the launcher (`ipd_scale` in `stereo.txt`). |
 | View off-center | Look straight ahead and press Ctrl+F12. |
 | HUD too close or too far | Change the factor in the launcher's HUD distance box (X4 closed) and press *Apply*. |
+| Message or target panel hard to see in the lower corners, or in the way | Change *Side panels* (ship or on foot) in the launcher's HUD distance box (X4 closed) and press *Apply*: lower is closer to the centre. |
 | A view or menu doesn't work in VR | Press Ctrl+F11 for the virtual screen, and Ctrl+F11 again to return. |
 | Walking shows the virtual screen instead of stereo | The log should show `on-foot head-pose zeroing patched` and `on-foot camera offset patched`. A `signature mismatch` means X4 changed that code in your version, so walking isn't supported there yet. |
 | Game froze at startup (rare) | Close it and launch again. Disabling overlay hooks (Overwolf, OBS game capture) can help. |
