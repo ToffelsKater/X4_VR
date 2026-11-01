@@ -130,9 +130,11 @@ const x4vr::code::x4::HudCamera* hud_camera{};
 void hud_camera_update(void* engine, void* update) {
     auto* view = *reinterpret_cast<unsigned char**>(*reinterpret_cast<unsigned char**>(update)+8);
     const auto* queue = *reinterpret_cast<const unsigned char* const*>(view+hud_camera->queue);
-    const std::string_view label = queue ? std::string_view(reinterpret_cast<const char*>(queue+hud_camera->label),
-                                                            strnlen(reinterpret_cast<const char*>(queue+hud_camera->label), 64)) : "";
-    if (label == "Anark - cockpit_crosshair" || label == "Anark - monitors") {
+    std::string_view label = queue ? std::string_view(reinterpret_cast<const char*>(queue+hud_camera->label),
+                                                      strnlen(reinterpret_cast<const char*>(queue+hud_camera->label), 64)) : "";
+    if (!label.starts_with(hud_camera->prefix)) label = "";
+    label.remove_prefix(label.empty() ? 0 : hud_camera->prefix.size());
+    if (label == "cockpit_crosshair" || label == "monitors") {
         // The pose update rebuilds the projection from the camera's field of view (9.00:
         // 0xf414c0: scale y = 1/tan(fov/2)/aspect term), so set that: tan(fov/2) grows by
         // own scale y * game_tan_y, which makes scale y 1/game_tan_y like the scene's.
@@ -140,7 +142,7 @@ void hud_camera_update(void* engine, void* update) {
         // load, with the same values); both update on X4's UI thread only.
         struct Own { bool known; float fov, scale_y; };
         static Own own[2]{};
-        auto& mine = own[label == "Anark - monitors"];
+        auto& mine = own[label == "monitors"];
         auto* camera = view+hud_camera->camera;
         auto& fov = *reinterpret_cast<float*>(camera+hud_camera->fov);
         if (!mine.known) mine = {true, fov, reinterpret_cast<const float*>(camera+hud_camera->projection)[5]};
