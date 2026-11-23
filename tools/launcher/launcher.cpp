@@ -118,20 +118,12 @@ void default_freetrack_path() {
     const auto path = app.bin.wstring();
     RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\FreeTrack\\FreeTrackClient", L"Path", REG_SZ, path.c_str(), DWORD((path.size()+1)*sizeof(wchar_t)));
 }
-// X4 keeps one config per Steam account under Documents\Egosoft\X4\<id>\; use the newest.
-fs::path x4_config() {
+fs::path x4_config() { // Documents\Egosoft\X4\<Steam id>\config.xml, or Documents\Egosoft\X4\config.xml (GOG)
     PWSTR documents{};
     if (FAILED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &documents))) return {};
     const fs::path base = fs::path(documents)/L"Egosoft"/L"X4";
     CoTaskMemFree(documents);
-    fs::path newest; fs::file_time_type time{};
-    std::error_code error;
-    for (const auto& entry : fs::directory_iterator(base, error)) {
-        const auto config = entry.path()/L"config.xml";
-        const auto modified = fs::last_write_time(config, error);
-        if (!error && (newest.empty() || modified > time)) { newest = config; time = modified; }
-    }
-    return newest;
+    return newest_config(base);
 }
 std::vector<std::string> missing_build_files() {
     std::vector<std::string> missing;
@@ -747,9 +739,17 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     default_freetrack_path();
     INITCOMMONCONTROLSEX common{sizeof(common), ICC_BAR_CLASSES | ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&common);
-    const auto screen = GetDC(nullptr); app.dpi = GetDeviceCaps(screen, LOGPIXELSY); ReleaseDC(nullptr, screen);
+    const auto screen = GetDC(nullptr); const int system_dpi = GetDeviceCaps(screen, LOGPIXELSY); ReleaseDC(nullptr, screen);
+    // The layout is 922 px tall at 96 dpi: at 125 % on a 1080p screen, Play sat below the screen.
+    // Shrink layout and font until the window fits the work area, and place the window inside it.
+    const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+    RECT work{}, frame{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+    AdjustWindowRect(&frame, style, FALSE);
+    app.dpi = std::min(system_dpi, int(work.bottom-work.top-(frame.bottom-frame.top))*96/922);
     NONCLIENTMETRICSW metrics{sizeof(metrics)};
     SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0);
+    metrics.lfMessageFont.lfHeight = MulDiv(metrics.lfMessageFont.lfHeight, app.dpi, system_dpi);
     app.font = CreateFontIndirectW(&metrics.lfMessageFont);
 
     WNDCLASSW type{};
@@ -758,10 +758,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     type.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     RegisterClassW(&type);
     RECT size{0, 0, MulDiv(520, app.dpi, 96), MulDiv(922, app.dpi, 96)};
-    const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     AdjustWindowRect(&size, style, FALSE);
-    app.window = CreateWindowExW(0, type.lpszClassName, L"X4 Native VR", style, CW_USEDEFAULT, CW_USEDEFAULT,
-                                 size.right-size.left, size.bottom-size.top, nullptr, nullptr, instance, nullptr);
+    const int width = size.right-size.left, height = size.bottom-size.top;
+    app.window = CreateWindowExW(0, type.lpszClassName, L"X4 Native VR", style, work.left+std::max(0, int(work.right-work.left-width)/2),
+                                 work.top+std::max(0, int(work.bottom-work.top-height)/2), width, height, nullptr, nullptr, instance, nullptr);
     create_controls();
     if (const auto hud = get(installed_hud(), "scale"); !hud.empty()) SetWindowTextW(app.controls[HudEdit], widen(hud).c_str());
     SetWindowTextW(app.controls[PanelEdit], widen(format_number(installed_panels())).c_str());

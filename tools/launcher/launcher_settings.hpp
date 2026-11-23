@@ -1,11 +1,28 @@
 #pragma once
 // Launcher logic without Win32: stereo.txt profiles and X4's config.xml checks.
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace x4vr::launcher {
+
+// X4's config.xml in its user folder: Steam keeps one per account in <id>\, GOG one directly in
+// the folder. The newest is the one in use.
+inline std::filesystem::path newest_config(const std::filesystem::path& base) {
+    std::vector<std::filesystem::path> folders{base};
+    std::error_code error;
+    for (const auto& entry : std::filesystem::directory_iterator(base, error)) folders.push_back(entry.path());
+    std::filesystem::path newest;
+    std::filesystem::file_time_type time{};
+    for (const auto& folder : folders) {
+        const auto config = folder/"config.xml";
+        const auto modified = std::filesystem::last_write_time(config, error);
+        if (!error && (newest.empty() || modified > time)) { newest = config; time = modified; }
+    }
+    return newest;
+}
 
 // Ordered key=value lines (stereo.txt and profile files share the format).
 using Settings = std::vector<std::pair<std::string, std::string>>;

@@ -2,8 +2,10 @@
 // HUD distance mod rewriting.
 #include "../tools/launcher/launcher_settings.hpp"
 #include "../tools/launcher/hud_mod.hpp"
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 
 using namespace x4vr::launcher;
 
@@ -55,6 +57,21 @@ int main() {
     CHECK(failing(check_x4(without_fsr, 2560, 1440)) == 0); // X4 8.00 has no FSR frame generation setting
     const auto inserted = xml_set("<root>\n</root>\n", "enableopentrack", "true");
     CHECK(xml_value(inserted, "enableopentrack", v) && v == "true");
+
+    // config.xml: GOG keeps it directly in X4's user folder, Steam in <account id>\; the newest is in use.
+    {
+        namespace fs = std::filesystem;
+        const auto base = fs::temp_directory_path()/"x4vr_launcher_tests"/"X4";
+        fs::remove_all(base.parent_path());
+        CHECK(newest_config(base).empty());
+        fs::create_directories(base/"76561198000000000");
+        std::ofstream(base/"config.xml") << "<root/>";
+        CHECK(newest_config(base) == base/"config.xml");
+        std::ofstream(base/"76561198000000000"/"config.xml") << "<root/>";
+        fs::last_write_time(base/"config.xml", fs::last_write_time(base/"76561198000000000"/"config.xml")-std::chrono::hours(1));
+        CHECK(newest_config(base) == base/"76561198000000000"/"config.xml");
+        fs::remove_all(base.parent_path());
+    }
 
     Stats stats{};
     CHECK(parse_stats_line("29994546 180 94 93 2 0 5 0.21 0.29 11.64 0.00 11.41 | 1 0 1 0 1", stats));
