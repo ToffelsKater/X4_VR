@@ -13,10 +13,4 @@ body when publishing, then clear this file.
      - GOG: config.xml path taken from PCGamingWiki (Documents\Egosoft\X4\config.xml), not seen on a
        GOG install yet. The VR patches were never checked against GOG's X4.exe.
      - Launcher fit to small screens: tested with a simulated 1080p at 125 % work area only.
-     v0.6.2 is a pre-release with the two entries below, for a GOG player. 0.6.1 stays Latest; keep
-     the entries for the next normal release. -->
-
-
-- The launcher now finds X4's settings on the GOG version, which keeps `config.xml` directly in `Documents\Egosoft\X4`.
-- The launcher window fits on smaller screens. At 125 % or 150 % scaling on a 1080p screen, the Play button was below the edge of the screen.
-- You can pass your own arguments to X4 through the launcher. Set the user environment variable `X4VR_GAME_ARGS`, for example to `-skipintro -nocputhrottle -logfile debuglog.txt`. It replaces the default arguments, so keep `-nocputhrottle` in it: without it, X4 drops to about 12 fps while its window is not focused. (#34)
+     v0.6.3 shipped the GOG and launcher entries as Latest. -->
