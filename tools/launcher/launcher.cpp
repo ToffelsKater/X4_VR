@@ -502,7 +502,8 @@ std::wstring environment_block() {
     variables[L"X4VR_RUNTIME"] = uses_openxr(app.profile) ? L"openxr" : L"openvr";
     for (const auto* off : {L"X4VR_CAPTURE_MEMORY", L"X4VR_CAPTURE_NATIVE_CAMERA", L"X4VR_CAPTURE_STACK", L"X4VR_CAPTURE_SHADERS", L"X4VR_HEAD_LOOK", L"X4VR_SCENE_COPY"})
         variables[off] = L"0";
-    variables[L"X4VR_GAME_ARGS"] = L"-skipintro -nocputhrottle";
+    // A user value replaces the defaults (#34), as on Linux; it should keep -nocputhrottle.
+    if (variables[L"X4VR_GAME_ARGS"].empty()) variables[L"X4VR_GAME_ARGS"] = L"-skipintro -nocputhrottle";
     std::wstring block;
     for (const auto& [name, value] : variables) block += name+L'='+value+L'\0';
     return block+L'\0';

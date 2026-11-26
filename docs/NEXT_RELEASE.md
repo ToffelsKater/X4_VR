@@ -19,3 +19,4 @@ body when publishing, then clear this file.
 
 - The launcher now finds X4's settings on the GOG version, which keeps `config.xml` directly in `Documents\Egosoft\X4`.
 - The launcher window fits on smaller screens. At 125 % or 150 % scaling on a 1080p screen, the Play button was below the edge of the screen.
+- You can pass your own arguments to X4 through the launcher. Set the user environment variable `X4VR_GAME_ARGS`, for example to `-skipintro -nocputhrottle -logfile debuglog.txt`. It replaces the default arguments, so keep `-nocputhrottle` in it: without it, X4 drops to about 12 fps while its window is not focused. (#34)
